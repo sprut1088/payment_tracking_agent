@@ -1,0 +1,22 @@
+{
+  "$schema": "./scenario.schema.json",
+  "id": "scenario-10-02",
+  "name": "10:02 GMT — New batch plus return file for prior held payments",
+  "description": "15-payment CCD file, 12 settle. Return file resolves the 2 pending payments from the 10:00 cycle to REJECTED.",
+  "cycleTime": "10:02",
+  "dependsOn": ["scenario-10-00"],
+  "artifacts": {
+    "ccd": "demo-data/ccd/10-02.ccd",
+    "settlement": "demo-data/settlement/10-02.settlement",
+    "clearedTraces": "demo-data/settlement/10-02.cleared.json",
+    "returns": "demo-data/returns/10-02.return",
+    "historical": "demo-data/historical/customers.json"
+  },
+  "expectedOutcome": {
+    "paymentsCreated": 15,
+    "cleared": 12,
+    "withBeneficiaryBank": 3,
+    "priorPaymentsRejectedByReturn": 2
+  },
+  "notes": "Bootstrap placeholder. Artifacts and fixtures are populated in a later prompt."
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Demo Scenario",
+  "type": "object",
+  "required": ["id", "name", "cycleTime", "artifacts"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "cycleTime": {
+      "type": "string",
+      "description": "Simulated cycle time, HH:MM (24h). Real bank cycles are 10:00, 14:00, 18:00 GMT; demo may accelerate."
+    },
+    "dependsOn": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "ccd": { "type": ["string", "null"] },
+        "settlement": { "type": ["string", "null"] },
+        "clearedTraces": { "type": ["string", "null"] },
+        "returns": { "type": ["string", "null"] },
+        "historical": { "type": ["string", "null"] }
+      }
+    },
+    "expectedOutcome": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "notes": { "type": "string" }
+  }
+}

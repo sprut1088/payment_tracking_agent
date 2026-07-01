@@ -1,0 +1,21 @@
+{
+  "$schema": "./scenario.schema.json",
+  "id": "scenario-10-00",
+  "name": "10:00 GMT — First cycle with 2 payments held at beneficiary bank",
+  "description": "20-payment CCD file, 18 settle, 2 remain with beneficiary bank pending later evidence.",
+  "cycleTime": "10:00",
+  "artifacts": {
+    "ccd": "demo-data/ccd/10-00.ccd",
+    "settlement": "demo-data/settlement/10-00.settlement",
+    "clearedTraces": "demo-data/settlement/10-00.cleared.json",
+    "returns": null,
+    "historical": "demo-data/historical/customers.json"
+  },
+  "expectedOutcome": {
+    "paymentsCreated": 20,
+    "cleared": 18,
+    "withBeneficiaryBank": 2,
+    "rejected": 0
+  },
+  "notes": "Bootstrap placeholder. Artifacts and fixtures are populated in a later prompt."
+}
