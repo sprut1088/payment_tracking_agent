@@ -41,6 +41,10 @@ from payment_tracking_agent.parsers.ccd import (
     mask_account_number,
     parse_ccd_file,
 )
+from payment_tracking_agent.parsers.nacha_return import (
+    ParsedReturnAddenda,
+    parse_return_file,
+)
 from payment_tracking_agent.parsers.scheme_reject import (
     SchemeRejectRecord,
     parse_scheme_reject_file,
@@ -150,16 +154,23 @@ class FolderWatcher:
         return result
 
     def check_returns(self, now: datetime | None = None) -> ScanResult:
-        """Discover new NACHA return files."""
+        """Discover new NACHA return files and update the ledger."""
         now = now or datetime.now(timezone.utc)
         self.ensure_directories()
         cfg = self.config_view
         result = ScanResult(scanned_at=now)
 
+        return_pending: list[tuple[str, DetectedFile]] = []
         for file in self._list_new_files(cfg.returns_dir, FileKind.RETURN, now):
-            if self._attach_to_batch(file) is None:
+            batch_key = self._attach_to_batch(file)
+            if batch_key is None:
                 self._store.record_detected(file)
+            else:
+                return_pending.append((batch_key, file))
             result.new_files.append(file)
+
+        for batch_key, file in return_pending:
+            self._apply_return_file(batch_key, file, now)
 
         self._advance_all(now, result)
         return result
@@ -357,6 +368,44 @@ class FolderWatcher:
         elif record.reason:
             parts.append(f"Scheme reason: {record.reason}")
         return " ".join(parts)
+
+    def _apply_return_file(
+        self, batch_key: str, file: DetectedFile, now: datetime
+    ) -> None:
+        parsed = parse_return_file(file.path)
+        for addenda in parsed.addenda:
+            if not addenda.original_trace_number:
+                continue
+            for payment in self._ledger.list_by_batch(batch_key):
+                if not payment.trace_number:
+                    continue
+                if payment.trace_number != addenda.original_trace_number:
+                    continue
+                if payment.current_status == PaymentStatus.REJECTED_BY_SCHEME:
+                    continue
+                if payment.current_status == PaymentStatus.REJECTED_BY_BENEFICIARY_BANK:
+                    continue
+                evidence = PaymentEvidence(
+                    source=f"NACHA return file {file.filename}",
+                    summary=self._return_evidence_summary(file.filename, addenda),
+                    recorded_at=now,
+                )
+                self._ledger.append_status(
+                    payment.payment_id,
+                    PaymentStatus.REJECTED_BY_BENEFICIARY_BANK,
+                    evidence,
+                    at=now,
+                )
+
+    @staticmethod
+    def _return_evidence_summary(
+        filename: str, addenda: ParsedReturnAddenda
+    ) -> str:
+        return (
+            "Beneficiary bank returned this payment via NACHA return file "
+            f"{filename}; original trace number {addenda.original_trace_number}, "
+            f"return reason code {addenda.return_reason_code}."
+        )
 
 
 _watcher = FolderWatcher()
