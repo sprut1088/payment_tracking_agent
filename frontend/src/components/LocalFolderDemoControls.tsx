@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import type {
   DemoFlowBatch,
+  DemoFlowBatchStatus,
   DemoFlowConfig,
   DemoFlowScanResult,
   DemoFlowState,
@@ -12,6 +13,19 @@ function formatTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function batchStatusLabel(status: DemoFlowBatchStatus): string {
+  switch (status) {
+    case "AWAITING_SETTLEMENT":
+      return "Awaiting settlement / scheme evidence";
+    case "AWAITING_RETURNS":
+      return "Monitoring returns";
+    case "RETURN_EVIDENCE_RECEIVED":
+      return "Return evidence received";
+    default:
+      return status;
+  }
 }
 
 function evidenceLabel(status: SettlementSchemeEvidenceStatus): string {
@@ -94,7 +108,9 @@ export function LocalFolderDemoControls() {
       totalBatches: batches.length,
       awaitingSettlement: batches.filter((b) => b.status === "AWAITING_SETTLEMENT").length,
       awaitingReturns: batches.filter((b) => b.status === "AWAITING_RETURNS").length,
-      complete: batches.filter((b) => b.status === "COMPLETE").length,
+      returnEvidenceReceived: batches.filter(
+        (b) => b.status === "RETURN_EVIDENCE_RECEIVED",
+      ).length,
       detectedFiles: flowState?.detected_files.length ?? 0,
     };
   }, [flowState]);
@@ -105,7 +121,9 @@ export function LocalFolderDemoControls() {
         <h2 className="card__title">Local folder demo flow controls</h2>
         <p className="card__subtitle">
           Drive backend endpoints for folder setup and phased scanning: CCD,
-          settlement/scheme reject, then returns.
+          settlement/scheme reject, then returns. This panel shows file-evidence
+          state only; it is not a final customer payment outcome and return
+          files may still arrive later.
         </p>
       </header>
 
@@ -207,12 +225,12 @@ export function LocalFolderDemoControls() {
           <div className="local-flow__stat-value">{summary.awaitingSettlement}</div>
         </div>
         <div className="local-flow__stat">
-          <div className="local-flow__stat-label">Awaiting returns</div>
+          <div className="local-flow__stat-label">Monitoring returns</div>
           <div className="local-flow__stat-value">{summary.awaitingReturns}</div>
         </div>
         <div className="local-flow__stat">
-          <div className="local-flow__stat-label">Complete</div>
-          <div className="local-flow__stat-value">{summary.complete}</div>
+          <div className="local-flow__stat-label">Return evidence received</div>
+          <div className="local-flow__stat-value">{summary.returnEvidenceReceived}</div>
         </div>
         <div className="local-flow__stat">
           <div className="local-flow__stat-label">Detected files</div>
@@ -288,7 +306,7 @@ export function LocalFolderDemoControls() {
               {sortedBatches.map((batch) => (
                 <tr key={batch.batch_id}>
                   <td className="table__mono">{batch.batch_id}</td>
-                  <td>{batch.status}</td>
+                  <td>{batchStatusLabel(batch.status)}</td>
                   <td>{evidenceLabel(batch.settlement_scheme_status)}</td>
                   <td className="table__num">{batch.settlement_files.length}</td>
                   <td className="table__num">{batch.scheme_reject_files.length}</td>

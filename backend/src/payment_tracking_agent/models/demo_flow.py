@@ -24,11 +24,16 @@ class FileKind(str, Enum):
 
 
 class BatchIntakeStatus(str, Enum):
-    """Lifecycle state for a batch driven purely by the folder-scan schedule."""
+    """File-evidence state for a batch tracked by the local-folder scanner.
+
+    This is not a payment-outcome status. Return files may arrive later or
+    repeatedly, so RETURN_EVIDENCE_RECEIVED does not imply the batch is
+    finished or that individual payments are cleared.
+    """
 
     AWAITING_SETTLEMENT = "AWAITING_SETTLEMENT"
     AWAITING_RETURNS = "AWAITING_RETURNS"
-    COMPLETE = "COMPLETE"
+    RETURN_EVIDENCE_RECEIVED = "RETURN_EVIDENCE_RECEIVED"
 
 
 class SettlementSchemeEvidenceStatus(str, Enum):

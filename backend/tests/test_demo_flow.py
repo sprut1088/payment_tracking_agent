@@ -161,7 +161,7 @@ def test_check_settlement_attaches_and_advances(tmp_path: Path) -> None:
     assert [f.filename for f in batch.scheme_reject_files] == ["BATCH_001.reject.txt"]
 
 
-def test_check_returns_completes_batch(tmp_path: Path) -> None:
+def test_check_returns_marks_return_evidence_received(tmp_path: Path) -> None:
     settings = _make_settings(tmp_path)
     store = ScenarioStateStore()
     watcher = FolderWatcher(settings=settings, store=store)
@@ -178,7 +178,7 @@ def test_check_returns_completes_batch(tmp_path: Path) -> None:
     assert "BATCH_001" in result.batches_advanced
     batch = store.get_batch("BATCH_001")
     assert batch is not None
-    assert batch.status == BatchIntakeStatus.COMPLETE
+    assert batch.status == BatchIntakeStatus.RETURN_EVIDENCE_RECEIVED
     assert [f.filename for f in batch.return_files] == ["BATCH_001.return.ach"]
 
 
@@ -197,6 +197,27 @@ def test_unmatched_file_is_recorded_but_unattached(tmp_path: Path) -> None:
     assert store.has_seen(orphan)
     detected_paths = [f.path for f in store.list_detected_files()]
     assert orphan in detected_paths
+
+
+def test_evidence_advances_status_within_settlement_window(tmp_path: Path) -> None:
+    settings = _make_settings(tmp_path)
+    store = ScenarioStateStore()
+    watcher = FolderWatcher(settings=settings, store=store)
+    watcher.ensure_directories()
+    cfg = watcher.config_view
+
+    _write(cfg.inbox_dir / "BATCH_020.ccd")
+    t0 = datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc)
+    watcher.scan_ccd(now=t0)
+
+    _write(cfg.settlement_dir / "BATCH_020.settlement.txt")
+    # Well before the expected_settlement_scan_at (t0 + 120s).
+    result = watcher.check_settlement(now=t0 + timedelta(seconds=5))
+
+    assert "BATCH_020" in result.batches_advanced
+    batch = store.get_batch("BATCH_020")
+    assert batch is not None
+    assert batch.status == BatchIntakeStatus.AWAITING_RETURNS
 
 
 @pytest.fixture

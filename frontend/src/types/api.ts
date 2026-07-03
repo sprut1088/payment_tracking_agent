@@ -169,7 +169,7 @@ export type DemoFlowFileKind = "ccd" | "settlement" | "scheme_reject" | "return"
 export type DemoFlowBatchStatus =
   | "AWAITING_SETTLEMENT"
   | "AWAITING_RETURNS"
-  | "COMPLETE";
+  | "RETURN_EVIDENCE_RECEIVED";
 
 export type SettlementSchemeEvidenceStatus =
   | "NONE_AVAILABLE"

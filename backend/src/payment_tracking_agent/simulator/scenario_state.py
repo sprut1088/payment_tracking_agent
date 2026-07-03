@@ -96,22 +96,29 @@ class ScenarioStateStore:
             batch.settlement_scheme_status = SettlementSchemeEvidenceStatus.NONE_AVAILABLE
 
     def advance_status(self, batch_id: str, now: datetime) -> bool:
-        """Advance batch status based on elapsed time. Returns True if changed."""
+        """Advance batch file-evidence state. Returns True if changed.
+
+        Evidence arrival always advances the state; the time-based schedule
+        is a fallback so batches without evidence still leave AWAITING_SETTLEMENT
+        after the settlement window has elapsed. The final state is named
+        RETURN_EVIDENCE_RECEIVED because further return files may still arrive.
+        """
         with self._lock:
             batch = self._batches.get(batch_id)
             if batch is None:
                 return False
             new_status = batch.status
-            if (
-                batch.status == BatchIntakeStatus.AWAITING_SETTLEMENT
-                and now >= batch.expected_settlement_scan_at
+            if new_status == BatchIntakeStatus.AWAITING_SETTLEMENT and (
+                batch.settlement_files
+                or batch.scheme_reject_files
+                or now >= batch.expected_settlement_scan_at
             ):
                 new_status = BatchIntakeStatus.AWAITING_RETURNS
             if (
                 new_status == BatchIntakeStatus.AWAITING_RETURNS
-                and now >= batch.expected_returns_scan_at
+                and batch.return_files
             ):
-                new_status = BatchIntakeStatus.COMPLETE
+                new_status = BatchIntakeStatus.RETURN_EVIDENCE_RECEIVED
             if new_status != batch.status:
                 batch.status = new_status
                 return True

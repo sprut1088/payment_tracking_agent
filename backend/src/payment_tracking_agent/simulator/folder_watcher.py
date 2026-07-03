@@ -141,7 +141,7 @@ class FolderWatcher:
 
     def _advance_all(self, now: datetime, result: ScanResult) -> None:
         for batch in self._store.list_batches():
-            if batch.status == BatchIntakeStatus.COMPLETE:
+            if batch.status == BatchIntakeStatus.RETURN_EVIDENCE_RECEIVED:
                 continue
             if self._store.advance_status(batch.batch_id, now):
                 if batch.batch_id not in result.batches_advanced:
