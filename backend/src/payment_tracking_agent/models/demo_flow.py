@@ -31,6 +31,15 @@ class BatchIntakeStatus(str, Enum):
     COMPLETE = "COMPLETE"
 
 
+class SettlementSchemeEvidenceStatus(str, Enum):
+    """Availability of settlement and scheme-reject evidence for a batch."""
+
+    NONE_AVAILABLE = "NONE_AVAILABLE"
+    SETTLEMENT_AVAILABLE = "SETTLEMENT_AVAILABLE"
+    SCHEME_REJECT_AVAILABLE = "SCHEME_REJECT_AVAILABLE"
+    SETTLEMENT_AND_SCHEME_REJECT_AVAILABLE = "SETTLEMENT_AND_SCHEME_REJECT_AVAILABLE"
+
+
 class DetectedFile(BaseModel):
     """A file the scanner has observed on disk."""
 
@@ -58,6 +67,9 @@ class BatchIntake(BaseModel):
     expected_settlement_scan_at: datetime
     expected_returns_scan_at: datetime
     status: BatchIntakeStatus = BatchIntakeStatus.AWAITING_SETTLEMENT
+    settlement_scheme_status: SettlementSchemeEvidenceStatus = (
+        SettlementSchemeEvidenceStatus.NONE_AVAILABLE
+    )
     settlement_files: list[DetectedFile] = Field(default_factory=list)
     scheme_reject_files: list[DetectedFile] = Field(default_factory=list)
     return_files: list[DetectedFile] = Field(default_factory=list)

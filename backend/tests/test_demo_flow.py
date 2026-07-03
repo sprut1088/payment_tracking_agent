@@ -10,7 +10,11 @@ from fastapi.testclient import TestClient
 
 from payment_tracking_agent.config import Settings
 from payment_tracking_agent.main import app
-from payment_tracking_agent.models.demo_flow import BatchIntakeStatus, FileKind
+from payment_tracking_agent.models.demo_flow import (
+    BatchIntakeStatus,
+    FileKind,
+    SettlementSchemeEvidenceStatus,
+)
 from payment_tracking_agent.simulator.folder_watcher import (
     FolderWatcher,
     get_folder_watcher,
@@ -66,10 +70,53 @@ def test_scan_ccd_registers_batch_with_schedule(tmp_path: Path) -> None:
     batch = store.get_batch("BATCH_001")
     assert batch is not None
     assert batch.status == BatchIntakeStatus.AWAITING_SETTLEMENT
+    assert batch.settlement_scheme_status == SettlementSchemeEvidenceStatus.NONE_AVAILABLE
     assert batch.uploaded_at == t0
     assert batch.expected_settlement_scan_at == t0 + timedelta(seconds=120)
     assert batch.expected_returns_scan_at == t0 + timedelta(seconds=240)
     assert batch.ccd_file.kind == FileKind.CCD
+
+
+def test_check_settlement_only_sets_evidence_status(tmp_path: Path) -> None:
+    settings = _make_settings(tmp_path)
+    store = ScenarioStateStore()
+    watcher = FolderWatcher(settings=settings, store=store)
+    watcher.ensure_directories()
+    cfg = watcher.config_view
+
+    _write(cfg.inbox_dir / "BATCH_010.ccd")
+    t0 = datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc)
+    watcher.scan_ccd(now=t0)
+
+    _write(cfg.settlement_dir / "BATCH_010.settlement.txt")
+    watcher.check_settlement(now=t0 + timedelta(seconds=125))
+
+    batch = store.get_batch("BATCH_010")
+    assert batch is not None
+    assert batch.settlement_scheme_status == SettlementSchemeEvidenceStatus.SETTLEMENT_AVAILABLE
+    assert [f.filename for f in batch.settlement_files] == ["BATCH_010.settlement.txt"]
+    assert batch.scheme_reject_files == []
+
+
+def test_check_scheme_reject_only_sets_evidence_status(tmp_path: Path) -> None:
+    settings = _make_settings(tmp_path)
+    store = ScenarioStateStore()
+    watcher = FolderWatcher(settings=settings, store=store)
+    watcher.ensure_directories()
+    cfg = watcher.config_view
+
+    _write(cfg.inbox_dir / "BATCH_011.ccd")
+    t0 = datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc)
+    watcher.scan_ccd(now=t0)
+
+    _write(cfg.scheme_reject_dir / "BATCH_011.reject.txt")
+    watcher.check_settlement(now=t0 + timedelta(seconds=125))
+
+    batch = store.get_batch("BATCH_011")
+    assert batch is not None
+    assert batch.settlement_scheme_status == SettlementSchemeEvidenceStatus.SCHEME_REJECT_AVAILABLE
+    assert batch.settlement_files == []
+    assert [f.filename for f in batch.scheme_reject_files] == ["BATCH_011.reject.txt"]
 
 
 def test_repeat_scan_ccd_does_not_duplicate(tmp_path: Path) -> None:
@@ -107,6 +154,9 @@ def test_check_settlement_attaches_and_advances(tmp_path: Path) -> None:
     batch = store.get_batch("BATCH_001")
     assert batch is not None
     assert batch.status == BatchIntakeStatus.AWAITING_RETURNS
+    assert batch.settlement_scheme_status == (
+        SettlementSchemeEvidenceStatus.SETTLEMENT_AND_SCHEME_REJECT_AVAILABLE
+    )
     assert [f.filename for f in batch.settlement_files] == ["BATCH_001.settlement.txt"]
     assert [f.filename for f in batch.scheme_reject_files] == ["BATCH_001.reject.txt"]
 
@@ -219,6 +269,9 @@ def test_api_check_settlement_attaches_files(api_client) -> None:
     assert batch is not None
     assert len(batch.settlement_files) == 1
     assert len(batch.scheme_reject_files) == 1
+    assert batch.settlement_scheme_status == (
+        SettlementSchemeEvidenceStatus.SETTLEMENT_AND_SCHEME_REJECT_AVAILABLE
+    )
 
 
 def test_api_check_returns_attaches_files(api_client) -> None:
@@ -251,6 +304,7 @@ def test_api_state_returns_batches_and_detected_files(api_client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert [b["batch_id"] for b in body["batches"]] == ["BATCH_001"]
+    assert body["batches"][0]["settlement_scheme_status"] == "NONE_AVAILABLE"
     filenames = sorted(f["filename"] for f in body["detected_files"])
     assert filenames == ["BATCH_001.ccd", "ORPHAN.return.ach"]
     assert "as_of" in body

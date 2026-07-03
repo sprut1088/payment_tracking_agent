@@ -14,6 +14,7 @@ from payment_tracking_agent.models.demo_flow import (
     BatchIntake,
     BatchIntakeStatus,
     DetectedFile,
+    SettlementSchemeEvidenceStatus,
 )
 
 
@@ -72,7 +73,27 @@ class ScenarioStateStore:
                 return False
             bucket.append(file)
             self._detected_files.setdefault(file.path, file)
+            self._refresh_settlement_scheme_status(batch)
             return True
+
+    @staticmethod
+    def _refresh_settlement_scheme_status(batch: BatchIntake) -> None:
+        has_settlement = bool(batch.settlement_files)
+        has_scheme_reject = bool(batch.scheme_reject_files)
+        if has_settlement and has_scheme_reject:
+            batch.settlement_scheme_status = (
+                SettlementSchemeEvidenceStatus.SETTLEMENT_AND_SCHEME_REJECT_AVAILABLE
+            )
+        elif has_settlement:
+            batch.settlement_scheme_status = (
+                SettlementSchemeEvidenceStatus.SETTLEMENT_AVAILABLE
+            )
+        elif has_scheme_reject:
+            batch.settlement_scheme_status = (
+                SettlementSchemeEvidenceStatus.SCHEME_REJECT_AVAILABLE
+            )
+        else:
+            batch.settlement_scheme_status = SettlementSchemeEvidenceStatus.NONE_AVAILABLE
 
     def advance_status(self, batch_id: str, now: datetime) -> bool:
         """Advance batch status based on elapsed time. Returns True if changed."""
