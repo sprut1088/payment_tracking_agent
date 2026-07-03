@@ -16,6 +16,8 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "python-multipart>=0.0.9",
+    "openai>=1.30",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
