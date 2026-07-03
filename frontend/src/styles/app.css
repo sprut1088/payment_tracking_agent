@@ -1410,6 +1410,11 @@ button {
 .live-ledger__evidence {
   color: var(--text-muted);
   font-size: 0.85rem;
+  max-width: 34rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.35;
 }
 
 /* ---------------- Live Folder Demo Runbook ---------------- */
@@ -1532,6 +1537,12 @@ button {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  min-width: 0;
+}
+
+.live-detail__field .table__mono {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .live-detail__label {
@@ -1608,6 +1619,9 @@ button {
 
 .live-detail__evidence-summary {
   font-size: 0.88rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 .live-detail__caveat {

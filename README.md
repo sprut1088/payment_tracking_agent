@@ -385,6 +385,68 @@ FedACH settlement summary is summary-level evidence only. The demo does not mark
 
 ---
 
+## Final Demo Script
+
+Follow this script to walk through the full demo in front of an audience.
+
+1. Start the backend.
+
+   ```powershell
+   cd C:\git_repos\payment_tracking_agent\backend
+   python -m uvicorn payment_tracking_agent.main:app --reload --port 8000
+   ```
+
+2. Start the frontend in a second terminal.
+
+   ```powershell
+   cd C:\git_repos\payment_tracking_agent\frontend
+   npm run dev
+   ```
+
+3. Open the app in the browser. Confirm the Demo Mode toggle in the top-right reads `ON`.
+4. Walk through Demo Mode ON to show the scripted SME-aligned mock story on the Demo Simulator, Batch Dashboard, Customer Dashboard, and Payment Search pages.
+5. Toggle Demo Mode to `OFF`. Confirm the Demo Simulator now shows the Live Folder Demo Runbook and Local Folder Demo Flow controls.
+6. Run the clean seed command:
+
+   ```powershell
+   .\scripts\seed-local-demo-files.ps1 -Phase clean
+   ```
+
+7. Run the CCD seed command, then click `Scan CCD` in the UI:
+
+   ```powershell
+   .\scripts\seed-local-demo-files.ps1 -Phase ccd
+   ```
+
+   Confirm the Live Payment Ledger appears with 16 payments in `SENT TO SCHEME`.
+
+8. Run the settlement seed command, then click `Check settlement` in the UI:
+
+   ```powershell
+   .\scripts\seed-local-demo-files.ps1 -Phase settlement
+   ```
+
+   Confirm the Live Payment Ledger now shows 15 in `WITH BENEFICIARY BANK` and 1 in `REJECTED BY SCHEME`.
+
+9. Run the returns seed command, then click `Check returns` in the UI:
+
+   ```powershell
+   .\scripts\seed-local-demo-files.ps1 -Phase returns
+   ```
+
+10. Confirm the final counts:
+
+    - 14 `WITH BENEFICIARY BANK`
+    - 1 `REJECTED BY SCHEME`
+    - 1 `REJECTED BY BENEFICIARY BANK`
+    - 0 `CLEARED`
+
+11. Open Batch Dashboard, Customer Dashboard, and Payment Search. Each view should be labeled `Live backend ledger from parsed CCD and file evidence`.
+12. In Payment Search, open one payment currently `REJECTED BY SCHEME` and one currently `REJECTED BY BENEFICIARY BANK`. Show their status history and evidence.
+13. Emphasize: Settlement summary is summary-level evidence only. The demo does not mark individual payments as cleared from settlement summary.
+
+---
+
 ## Important Design Rule
 
 Do not mark individual customer payments as cleared using summary-only settlement files.

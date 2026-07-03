@@ -78,11 +78,11 @@ export function LiveCustomerDashboard() {
     <section className="card">
       <header className="card__header card__header--split">
         <div>
-          <h2 className="card__title">Customer dashboard</h2>
-          <p className="card__subtitle">{LIVE_MODE_SUBTITLE}</p>
           <p className="live-ledger__mode-label">
             Live backend ledger from parsed CCD and file evidence
           </p>
+          <h2 className="card__title">Customer dashboard</h2>
+          <p className="card__subtitle">{LIVE_MODE_SUBTITLE}</p>
         </div>
         <div className="live-ledger__actions">
           {ledger && (
