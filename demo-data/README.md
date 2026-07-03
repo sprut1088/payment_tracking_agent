@@ -15,6 +15,8 @@ demo-data/
   returns/       NACHA return files
   historical/    Historical payment records for risk analysis
   scenarios/     End-to-end demo scenarios (JSON manifests)
+  local-folder-demo/
+    batch_1100/  Seed artifacts copied into backend/demo-inbox in phases
 ```
 
 Runtime state produced by the simulator lives under `demo-data/runtime/` and

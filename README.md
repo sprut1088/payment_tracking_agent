@@ -311,6 +311,21 @@ npm run dev
 
 ---
 
+## Local Folder Demo File Seeding
+
+```powershell
+.\scripts\seed-local-demo-files.ps1 -Phase clean
+.\scripts\seed-local-demo-files.ps1 -Phase ccd
+.\scripts\seed-local-demo-files.ps1 -Phase settlement
+.\scripts\seed-local-demo-files.ps1 -Phase returns
+```
+
+- after ccd, click Scan CCD
+- after settlement, click Check settlement
+- after returns, click Check returns
+
+---
+
 ## Important Design Rule
 
 Do not mark individual customer payments as cleared using summary-only settlement files.
