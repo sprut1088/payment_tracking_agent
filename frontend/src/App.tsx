@@ -17,9 +17,9 @@ export default function App() {
       onToggleDemoMode={() => setDemoMode((prev) => !prev)}
     >
       {nav === "simulator" && <DemoSimulatorPage demoMode={demoMode} />}
-      {nav === "batch" && <BatchDashboardPage />}
-      {nav === "customer" && <CustomerDashboardPage />}
-      {nav === "search" && <PaymentSearchPage />}
+      {nav === "batch" && <BatchDashboardPage demoMode={demoMode} />}
+      {nav === "customer" && <CustomerDashboardPage demoMode={demoMode} />}
+      {nav === "search" && <PaymentSearchPage demoMode={demoMode} />}
     </AppShell>
   );
 }

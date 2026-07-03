@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import {
+  LEDGER_STATUS_ORDER,
+  countByStatus,
+  formatDollars,
+  formatTimestamp,
+  latestEvidenceSummary,
+  sortPaymentsByPaymentId,
+} from "../api/ledger";
 import { StatusBadge } from "./StatusBadge";
 import type {
   DemoFlowBatch,
@@ -7,32 +15,9 @@ import type {
   DemoFlowConfig,
   DemoFlowScanResult,
   DemoFlowState,
-  LedgerPayment,
-  LedgerPaymentStatus,
   PaymentLedgerView,
   SettlementSchemeEvidenceStatus,
 } from "../types/api";
-
-function formatTimestamp(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
-
-function formatDollars(amountCents: number): string {
-  return (amountCents / 100).toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-  });
-}
-
-function latestEvidenceSummary(payment: LedgerPayment): string {
-  const history = payment.status_history;
-  if (history.length > 0) return history[history.length - 1].evidence.summary;
-  const evidence = payment.evidence;
-  if (evidence.length > 0) return evidence[evidence.length - 1].summary;
-  return "";
-}
 
 function batchStatusLabel(status: DemoFlowBatchStatus): string {
   switch (status) {
@@ -65,18 +50,6 @@ function evidenceLabel(status: SettlementSchemeEvidenceStatus): string {
 function sortBatchesNewestFirst(rows: DemoFlowBatch[]): DemoFlowBatch[] {
   return [...rows].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
 }
-
-function sortPaymentsByPaymentId(rows: LedgerPayment[]): LedgerPayment[] {
-  return [...rows].sort((a, b) => a.payment_id.localeCompare(b.payment_id));
-}
-
-const LEDGER_STATUS_ORDER: LedgerPaymentStatus[] = [
-  "WITH BANK",
-  "SENT TO SCHEME",
-  "WITH BENEFICIARY BANK",
-  "REJECTED BY SCHEME",
-  "REJECTED BY BENEFICIARY BANK",
-];
 
 export function LocalFolderDemoControls() {
   const [config, setConfig] = useState<DemoFlowConfig | null>(null);
@@ -165,17 +138,7 @@ export function LocalFolderDemoControls() {
   );
 
   const ledgerCounts = useMemo(() => {
-    const counts: Record<LedgerPaymentStatus, number> = {
-      "WITH BANK": 0,
-      "SENT TO SCHEME": 0,
-      "WITH BENEFICIARY BANK": 0,
-      "REJECTED BY SCHEME": 0,
-      "REJECTED BY BENEFICIARY BANK": 0,
-    };
-    for (const payment of ledger?.payments ?? []) {
-      counts[payment.current_status] += 1;
-    }
-    return counts;
+    return countByStatus(ledger?.payments ?? []);
   }, [ledger?.payments]);
 
   return (

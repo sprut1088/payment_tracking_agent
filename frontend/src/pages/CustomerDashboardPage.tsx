@@ -1,9 +1,14 @@
 import { useState } from "react";
 import { CustomerDashboard } from "../components/CustomerDashboard";
+import { LiveCustomerDashboard } from "../components/LiveCustomerDashboard";
 import { PaymentDetailDrawer } from "../components/PaymentDetailDrawer";
 import type { PaymentRecord } from "../types/api";
 
-export function CustomerDashboardPage() {
+interface CustomerDashboardPageProps {
+  demoMode: boolean;
+}
+
+export function CustomerDashboardPage({ demoMode }: CustomerDashboardPageProps) {
   const [selected, setSelected] = useState<PaymentRecord | null>(null);
 
   return (
@@ -13,14 +18,24 @@ export function CustomerDashboardPage() {
           <div className="page__eyebrow">Operations</div>
           <h1 className="page__title">Customer Dashboard</h1>
           <p className="page__subtitle">
-            All payments for a customer across batches and dates, with historical
-            rejection context. Demo Mode ON uses the scripted SME-aligned story.
+            {demoMode
+              ? "Demo Mode ON: scripted SME-aligned mock story with historical rejection context."
+              : "Demo Mode OFF: live backend ledger grouped by individual ID and name."}
           </p>
         </div>
       </header>
 
-      <CustomerDashboard onSelectPayment={setSelected} />
-      <PaymentDetailDrawer payment={selected} onClose={() => setSelected(null)} />
+      {demoMode ? (
+        <>
+          <CustomerDashboard onSelectPayment={setSelected} />
+          <PaymentDetailDrawer
+            payment={selected}
+            onClose={() => setSelected(null)}
+          />
+        </>
+      ) : (
+        <LiveCustomerDashboard />
+      )}
     </div>
   );
 }

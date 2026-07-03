@@ -1,9 +1,14 @@
 import { useState } from "react";
 import { BatchDashboard } from "../components/BatchDashboard";
+import { LiveBatchDashboard } from "../components/LiveBatchDashboard";
 import { PaymentDetailDrawer } from "../components/PaymentDetailDrawer";
 import type { PaymentRecord } from "../types/api";
 
-export function BatchDashboardPage() {
+interface BatchDashboardPageProps {
+  demoMode: boolean;
+}
+
+export function BatchDashboardPage({ demoMode }: BatchDashboardPageProps) {
   const [selected, setSelected] = useState<PaymentRecord | null>(null);
 
   return (
@@ -13,15 +18,24 @@ export function BatchDashboardPage() {
           <div className="page__eyebrow">Operations</div>
           <h1 className="page__title">Batch Dashboard</h1>
           <p className="page__subtitle">
-            Payments grouped by batch and cycle. Click a payment to inspect
-            evidence and its status timeline. In Demo Mode ON, this dashboard
-            uses predefined SME-aligned mock data.
+            {demoMode
+              ? "Demo Mode ON: predefined SME-aligned mock data grouped by batch and cycle."
+              : "Demo Mode OFF: live backend ledger from parsed CCD and file evidence."}
           </p>
         </div>
       </header>
 
-      <BatchDashboard onSelectPayment={setSelected} />
-      <PaymentDetailDrawer payment={selected} onClose={() => setSelected(null)} />
+      {demoMode ? (
+        <>
+          <BatchDashboard onSelectPayment={setSelected} />
+          <PaymentDetailDrawer
+            payment={selected}
+            onClose={() => setSelected(null)}
+          />
+        </>
+      ) : (
+        <LiveBatchDashboard />
+      )}
     </div>
   );
 }
