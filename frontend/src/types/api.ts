@@ -3,21 +3,19 @@
 
 export type BusinessStatus =
   | "WITH BANK"
-  | "WITH SCHEME"
+  | "SENT TO SCHEME"
   | "WITH BENEFICIARY BANK"
-  | "CLEARED"
-  | "REJECTED";
+  | "REJECTED BY SCHEME"
+  | "REJECTED BY BENEFICIARY BANK";
 
 export type InternalStatus =
   | "WITH_BANK_UPLOADED"
   | "WITH_BANK_VALIDATING"
   | "WITH_BANK_READY_FOR_SCHEME"
   | "WITH_SCHEME_SUBMITTED"
-  | "WITH_SCHEME_ACKNOWLEDGED"
   | "WITH_BENEFICIARY_BANK_PENDING"
-  | "CLEARED_BY_SETTLEMENT"
+  | "REJECTED_BY_SCHEME_FILE"
   | "REJECTED_BY_RETURN_FILE"
-  | "RECONCILIATION_EXCEPTION"
   | "REVIEW_REQUIRED";
 
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH";
@@ -41,19 +39,21 @@ export interface CyclePlanEntry {
   cycleTime: string;
   label: string;
   ccdFile?: string;
+  settlementFile?: string;
+  schemeRejectFile?: string;
   returnFile?: string;
-  expectedCleared: number;
-  expectedWithBeneficiaryBank: number;
-  expectedRejectedFromPriorCycle: number;
+  expectedMovedToBeneficiaryBank: number;
+  expectedRejectedByScheme: number;
+  expectedRejectedByBeneficiaryBank: number;
 }
 
 export interface CycleRunSummary {
   cycleTime: string;
   status: "PENDING" | "RUNNING" | "COMPLETE";
   paymentsCreated: number;
-  cleared: number;
-  withBeneficiaryBank: number;
-  rejectedFromPriorCycle: number;
+  movedToBeneficiaryBank: number;
+  rejectedByScheme: number;
+  rejectedByBeneficiaryBank: number;
   ranAt?: string;
 }
 
@@ -73,10 +73,10 @@ export interface SimulationState {
   summary: {
     totalPayments: number;
     withBank: number;
-    withScheme: number;
+    sentToScheme: number;
     withBeneficiaryBank: number;
-    cleared: number;
-    rejected: number;
+    rejectedByScheme: number;
+    rejectedByBeneficiaryBank: number;
   };
   events: EventLogEntry[];
 }
@@ -89,7 +89,13 @@ export interface AgentTraceStep {
 }
 
 export interface EvidenceRef {
-  kind: "CCD" | "PROCESSING_ENGINE" | "SETTLEMENT" | "RETURN" | "HISTORICAL";
+  kind:
+    | "CCD"
+    | "PROCESSING_ENGINE"
+    | "SETTLEMENT"
+    | "SCHEME_REJECT"
+    | "RETURN"
+    | "HISTORICAL";
   sourceFile?: string;
   summary: string;
 }
@@ -134,20 +140,21 @@ export interface BatchSummary {
   cycleTime: string;
   sourceFile: string;
   paymentCount: number;
-  cleared: number;
+  sentToScheme: number;
   withBeneficiaryBank: number;
-  rejected: number;
+  rejectedByScheme: number;
+  rejectedByBeneficiaryBank: number;
   withBank: number;
-  withScheme: number;
 }
 
 export interface CustomerSummary {
   customerId: string;
   customerName: string;
   totalPayments: number;
-  cleared: number;
-  rejected: number;
+  sentToScheme: number;
   withBeneficiaryBank: number;
+  rejectedByScheme: number;
+  rejectedByBeneficiaryBank: number;
   lastRejectionDate?: string;
   historicalRejectionCount: number;
 }

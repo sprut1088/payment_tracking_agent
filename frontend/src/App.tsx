@@ -7,10 +7,16 @@ import { PaymentSearchPage } from "./pages/PaymentSearchPage";
 
 export default function App() {
   const [nav, setNav] = useState<NavKey>("simulator");
+  const [demoMode, setDemoMode] = useState<boolean>(true);
 
   return (
-    <AppShell activeNav={nav} onNavigate={setNav}>
-      {nav === "simulator" && <DemoSimulatorPage />}
+    <AppShell
+      activeNav={nav}
+      onNavigate={setNav}
+      demoMode={demoMode}
+      onToggleDemoMode={() => setDemoMode((prev) => !prev)}
+    >
+      {nav === "simulator" && <DemoSimulatorPage demoMode={demoMode} />}
       {nav === "batch" && <BatchDashboardPage />}
       {nav === "customer" && <CustomerDashboardPage />}
       {nav === "search" && <PaymentSearchPage />}

@@ -9,7 +9,8 @@ interface EvidenceViewerProps {
 const KIND_LABEL: Record<EvidenceRef["kind"], string> = {
   CCD: "CCD file",
   PROCESSING_ENGINE: "Processing engine",
-  SETTLEMENT: "Settlement report",
+  SETTLEMENT: "Settlement summary",
+  SCHEME_REJECT: "Scheme reject file",
   RETURN: "NACHA return file",
   HISTORICAL: "Historical records",
 };
@@ -31,6 +32,10 @@ export function EvidenceViewer({
   return (
     <section className="evidence">
       <h3 className="evidence__title">{title}</h3>
+      <p className="evidence__caveat">
+        Settlement summary evidence is aggregate-level only; payment-level
+        clearing is not claimed from summary totals.
+      </p>
       <ul className="evidence__list">
         {evidence.map((e, idx) => (
           <li key={idx} className={`evidence__item evidence__item--${e.kind.toLowerCase()}`}>

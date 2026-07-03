@@ -7,7 +7,11 @@ import { PaymentStatusBoard } from "../components/PaymentStatusBoard";
 import { ScenarioConfigPanel } from "../components/ScenarioConfigPanel";
 import type { AgentTraceStep, SimulationState } from "../types/api";
 
-export function DemoSimulatorPage() {
+interface DemoSimulatorPageProps {
+  demoMode: boolean;
+}
+
+export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
   const [state, setState] = useState<SimulationState | null>(null);
   const [trace, setTrace] = useState<AgentTraceStep[]>([]);
 
@@ -40,8 +44,9 @@ export function DemoSimulatorPage() {
           <div className="page__eyebrow">Simulator</div>
           <h1 className="page__title">Demo Simulator</h1>
           <p className="page__subtitle">
-            Drive the ACH payment lifecycle across configurable batch cycles and
-            watch the multi-agent workflow update the payment status ledger.
+            {demoMode
+              ? "Demo Mode ON: showing predefined SME-aligned mock story (11:00 and 11:04 cycles)."
+              : "Demo Mode OFF: backend local-folder controls are active below. Dashboards remain mocked for presentation."}
           </p>
         </div>
         <div className="clock">
@@ -53,9 +58,22 @@ export function DemoSimulatorPage() {
         </div>
       </header>
 
-      <ScenarioConfigPanel />
+      <ScenarioConfigPanel demoMode={demoMode} />
 
-      <LocalFolderDemoControls />
+      {demoMode ? (
+        <section className="card">
+          <header className="card__header">
+            <h2 className="card__title">Demo Mode ON</h2>
+            <p className="card__subtitle">
+              Local-folder backend controls are hidden in this mode. Use the
+              top-right toggle to switch OFF Demo Mode and run ensure/scan/check
+              actions against backend endpoints.
+            </p>
+          </header>
+        </section>
+      ) : (
+        <LocalFolderDemoControls />
+      )}
 
       <div className="grid grid--2">
         <PaymentStatusBoard state={state} />
@@ -70,7 +88,8 @@ export function DemoSimulatorPage() {
         <header className="card__header">
           <h2 className="card__title">Event log</h2>
           <p className="card__subtitle">
-            Latest events emitted during the cycles run so far.
+            Latest events emitted in the SME-aligned flow. Settlement entries
+            are summary-level evidence and do not claim payment-level clearing.
           </p>
         </header>
         <ul className="event-log">

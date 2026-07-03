@@ -42,7 +42,8 @@ export function BatchDashboard({ onSelectPayment }: BatchDashboardProps) {
         <h2 className="card__title">Batch dashboard</h2>
         <p className="card__subtitle">
           Payments grouped by batch and cycle. Filter by batch or status to
-          focus on a specific slice.
+          focus on a specific slice. Settlement records are summary evidence,
+          not payment-level clearing evidence.
         </p>
       </header>
 
@@ -64,9 +65,12 @@ export function BatchDashboard({ onSelectPayment }: BatchDashboardProps) {
             <div className="batch-summary__id">{b.batchId}</div>
             <div className="batch-summary__metrics">
               <span>{b.paymentCount} total</span>
-              <span className="text-success">{b.cleared} cleared</span>
-              <span className="text-warn">{b.withBeneficiaryBank} held</span>
-              <span className="text-danger">{b.rejected} rejected</span>
+              <span className="text-info">{b.sentToScheme} sent to scheme</span>
+              <span className="text-warn">{b.withBeneficiaryBank} with beneficiary bank</span>
+              <span className="text-danger">{b.rejectedByScheme} rejected by scheme</span>
+              <span className="text-danger-2">
+                {b.rejectedByBeneficiaryBank} rejected by beneficiary bank
+              </span>
             </div>
           </button>
         ))}
@@ -97,10 +101,12 @@ export function BatchDashboard({ onSelectPayment }: BatchDashboardProps) {
           >
             <option value="">All statuses</option>
             <option value="WITH BANK">WITH BANK</option>
-            <option value="WITH SCHEME">WITH SCHEME</option>
+            <option value="SENT TO SCHEME">SENT TO SCHEME</option>
             <option value="WITH BENEFICIARY BANK">WITH BENEFICIARY BANK</option>
-            <option value="CLEARED">CLEARED</option>
-            <option value="REJECTED">REJECTED</option>
+            <option value="REJECTED BY SCHEME">REJECTED BY SCHEME</option>
+            <option value="REJECTED BY BENEFICIARY BANK">
+              REJECTED BY BENEFICIARY BANK
+            </option>
           </select>
         </label>
         <div className="filter-row__spacer" />
@@ -159,6 +165,10 @@ export function BatchDashboard({ onSelectPayment }: BatchDashboardProps) {
           </tbody>
         </table>
       </div>
+      <p className="table__note">
+        Each status has an evidence explanation. Open payment detail to review
+        settlement summary, scheme reject, and return-file sources.
+      </p>
     </section>
   );
 }

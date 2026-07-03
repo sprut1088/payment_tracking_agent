@@ -1,6 +1,6 @@
-// API client for the ACH Payment Tracking Agent frontend demo shell.
-// Most pages still use mock fixtures, while local-folder demo-flow controls
-// call the backend HTTP endpoints under /api/demo-flow.
+﻿// API client for the ACH Payment Tracking Agent frontend demo shell.
+// Dashboards use SME-aligned mock fixtures, while local-folder demo-flow
+// controls call backend HTTP endpoints under /api/demo-flow.
 
 import type {
   AgentTraceStep,
@@ -23,284 +23,233 @@ import type {
 
 const scenarios: Scenario[] = [
   {
-    id: "scenario-accelerated-2min",
-    name: "Accelerated demo — 2 minute cycles",
+    id: "scenario-sme-local-demo",
+    name: "SME-aligned local demo - 11:00 / 11:04",
     description:
-      "10:00 uploads 20 payments (18 cleared, 2 held). 10:02 uploads 15 payments (12 cleared) and a return file resolves the 2 held payments to REJECTED.",
-    cycleSchedule: ["10:00", "10:02", "10:04", "10:06"],
-    mode: "ACCELERATED_2MIN",
-  },
-  {
-    id: "scenario-real-day",
-    name: "Real day — 10:00 / 14:00 / 18:00 GMT",
-    description:
-      "Realistic bank day using the three real ACH cycles. Same lifecycle events as the accelerated demo, on real GMT times.",
-    cycleSchedule: ["10:00", "14:00", "18:00"],
-    mode: "REAL_DAY",
+      "11:00 uploads 4 payments ($400 total), receives settlement summary for $300 and scheme reject evidence for $100. 11:04 processes a NACHA return for one prior payment.",
+    cycleSchedule: ["11:00", "11:04", "11:08"],
+    mode: "ACCELERATED_4MIN",
   },
 ];
 
 // ---------------------------------------------------------------------------
-// Payment fixtures for the accelerated 2-minute scenario
+// Payment fixtures for the SME-confirmed story
 // ---------------------------------------------------------------------------
 
 const CUSTOMERS: Array<{ id: string; name: string; dfi: string; account: string }> = [
-  { id: "CUS-1001", name: "Riverbend Manufacturing", dfi: "021000021", account: "****4821" },
-  { id: "CUS-1002", name: "Blue Harbor Logistics", dfi: "011000015", account: "****9330" },
-  { id: "CUS-1003", name: "Northwind Grocers", dfi: "026009593", account: "****1177" },
-  { id: "CUS-1004", name: "Cedar Peak Contractors", dfi: "031201360", account: "****6042" },
-  { id: "CUS-1005", name: "Silverline Software", dfi: "121000248", account: "****2288" },
+  { id: "CUS-3001", name: "Harbor Steel Works", dfi: "021000021", account: "****1041" },
+  { id: "CUS-3002", name: "Blue Ridge Clinics", dfi: "011000015", account: "****5572" },
+  { id: "CUS-3003", name: "Northline Components", dfi: "026009593", account: "****8830" },
+  { id: "CUS-3004", name: "Cedar Freight Group", dfi: "031201360", account: "****2406" },
 ];
 
 const BENEFICIARIES = [
-  "APEX PAYROLL SERVICES",
-  "GLOBAL LEASING CORP",
-  "STATEWIDE UTILITIES",
-  "PACIFIC BENEFITS INC",
-  "MIDLAND SUPPLY CO",
+  "ACME VENDOR SERVICES",
+  "ORION BENEFITS LLC",
+  "PIONEER LOGISTICS LTD",
+  "WATERFRONT PAYROLL INC",
 ];
+
+const BATCH_11_00 = "BATCH-2026-07-03-11-00";
+const CCD_11_00 = "ccd-batch-11-00.txt";
+const SETTLEMENT_11_00 = "settlement-summary-11-00.rpt";
+const SCHEME_REJECT_11_00 = "scheme-reject-11-00.txt";
+const RETURN_11_04 = "returns-11-04.ach";
 
 const ccdEvidence = (file: string): EvidenceRef => ({
   kind: "CCD",
   sourceFile: file,
-  summary: `Entry detail record parsed from ${file}`,
+  summary: `CCD entry detail captured from ${file}`,
 });
 
 const engineEvidence = (file: string): EvidenceRef => ({
   kind: "PROCESSING_ENGINE",
   sourceFile: file,
-  summary: `Processing engine accepted entry from ${file}`,
+  summary: `Submission acknowledged by processing engine for ${file}`,
 });
 
-const settlementEvidence = (file: string): EvidenceRef => ({
+const settlementSummaryEvidence = (file: string): EvidenceRef => ({
   kind: "SETTLEMENT",
   sourceFile: file,
-  summary: `Trace present in cleared trace list attached to ${file}`,
+  summary:
+    `Settlement summary ${file} received for aggregate amount only; no payment-level clearing is claimed from summary settlement evidence.`,
+});
+
+const schemeRejectEvidence = (file: string): EvidenceRef => ({
+  kind: "SCHEME_REJECT",
+  sourceFile: file,
+  summary: `Scheme reject evidence in ${file} matched one submitted payment for $100.`,
 });
 
 const returnEvidence = (file: string, code: string): EvidenceRef => ({
   kind: "RETURN",
   sourceFile: file,
-  summary: `NACHA return code ${code} matched on original trace`,
+  summary: `Return file matched original trace with NACHA code ${code}.`,
 });
+
+type PaymentOutcome =
+  | "WITH_BENEFICIARY_BANK"
+  | "REJECTED_BY_SCHEME"
+  | "REJECTED_BY_BENEFICIARY_BANK";
 
 interface PaymentSeed {
   trace: string;
   customerIndex: number;
   beneficiaryIndex: number;
   amount: number;
-  outcome: "CLEARED" | "WITH_BENEFICIARY_BANK" | "REJECTED";
+  outcome: PaymentOutcome;
   returnCode?: string;
   riskLevel?: PaymentRecord["riskLevel"];
   riskReason?: string;
 }
 
-const cycle1Seeds: PaymentSeed[] = Array.from({ length: 20 }, (_, i) => ({
-  trace: `10000100${(i + 1).toString().padStart(2, "0")}`,
-  customerIndex: i % CUSTOMERS.length,
-  beneficiaryIndex: i % BENEFICIARIES.length,
-  amount: 1250 + i * 145.5,
-  outcome: i < 18 ? "CLEARED" : "WITH_BENEFICIARY_BANK",
-  riskLevel: i === 18 ? "MEDIUM" : i === 19 ? "HIGH" : "LOW",
-  riskReason:
-    i === 18
-      ? "Beneficiary has 1 prior R03 in last 90 days"
-      : i === 19
-        ? "Customer has 3 prior R01 (insufficient funds) in last 60 days"
-        : undefined,
-}));
+const paymentSeeds: PaymentSeed[] = [
+  {
+    trace: "110000001",
+    customerIndex: 0,
+    beneficiaryIndex: 0,
+    amount: 100,
+    outcome: "WITH_BENEFICIARY_BANK",
+    riskLevel: "LOW",
+  },
+  {
+    trace: "110000002",
+    customerIndex: 1,
+    beneficiaryIndex: 1,
+    amount: 100,
+    outcome: "WITH_BENEFICIARY_BANK",
+    riskLevel: "LOW",
+  },
+  {
+    trace: "110000003",
+    customerIndex: 2,
+    beneficiaryIndex: 2,
+    amount: 100,
+    outcome: "REJECTED_BY_BENEFICIARY_BANK",
+    returnCode: "R01",
+    riskLevel: "MEDIUM",
+    riskReason: "Beneficiary had prior return pattern in last 60 days",
+  },
+  {
+    trace: "110000004",
+    customerIndex: 3,
+    beneficiaryIndex: 3,
+    amount: 100,
+    outcome: "REJECTED_BY_SCHEME",
+    returnCode: "SCH01",
+    riskLevel: "LOW",
+  },
+];
 
-// Cycle 1 held payments (indexes 18, 19) get resolved to REJECTED by the return
-// file that arrives during cycle 2. We flip their outcome after cycle 2 runs.
-const cycle1RejectedByCycle2 = new Set(["1000010019", "1000010020"]);
-
-const cycle2Seeds: PaymentSeed[] = Array.from({ length: 15 }, (_, i) => ({
-  trace: `10000200${(i + 1).toString().padStart(2, "0")}`,
-  customerIndex: (i + 2) % CUSTOMERS.length,
-  beneficiaryIndex: (i + 1) % BENEFICIARIES.length,
-  amount: 875 + i * 210.25,
-  outcome: i < 12 ? "CLEARED" : "WITH_BENEFICIARY_BANK",
-  riskLevel: i === 14 ? "MEDIUM" : "LOW",
-  riskReason:
-    i === 14 ? "Beneficiary added within the last 7 days" : undefined,
-}));
-
-function buildStatusHistory(
-  seed: PaymentSeed,
-  batchId: string,
-  cycleTime: string,
-  ccdFile: string,
-  settlementFile: string,
-  returnFile: string | undefined,
-  finalStatus: PaymentRecord["currentStatus"],
-): StatusHistoryEvent[] {
+function buildStatusHistory(seed: PaymentSeed): StatusHistoryEvent[] {
   const base: StatusHistoryEvent[] = [
     {
-      timestamp: `${cycleTime}:05`,
+      timestamp: "11:00:05",
       status: "WITH BANK",
       internalStatus: "WITH_BANK_UPLOADED",
-      source: ccdEvidence(ccdFile),
+      source: ccdEvidence(CCD_11_00),
       agent: "BeforePaymentSubmissionAgent",
-      reason: `Entry detail parsed from ${ccdFile} into batch ${batchId}`,
+      reason: `Entry detail parsed from ${CCD_11_00} into batch ${BATCH_11_00}`,
     },
     {
-      timestamp: `${cycleTime}:12`,
+      timestamp: "11:00:10",
       status: "WITH BANK",
-      internalStatus: "WITH_BANK_READY_FOR_SCHEME",
-      source: ccdEvidence(ccdFile),
+      internalStatus: "WITH_BANK_VALIDATING",
+      source: ccdEvidence(CCD_11_00),
       agent: "BeforePaymentSubmissionAgent",
-      reason: "Syntax validation passed and historical risk check complete",
+      reason: "Bank-side syntax validation passed",
     },
     {
-      timestamp: `${cycleTime}:20`,
-      status: "WITH SCHEME",
+      timestamp: "11:00:18",
+      status: "SENT TO SCHEME",
       internalStatus: "WITH_SCHEME_SUBMITTED",
-      source: engineEvidence(ccdFile),
+      source: engineEvidence(CCD_11_00),
       agent: "AfterPaymentSubmissionAgent",
-      reason: "Processing engine acknowledged submission to scheme",
+      reason: "Payment submitted to scheme successfully",
     },
   ];
 
-  if (finalStatus === "CLEARED") {
+  if (seed.outcome === "REJECTED_BY_SCHEME") {
     base.push({
-      timestamp: `${cycleTime}:45`,
-      status: "CLEARED",
-      internalStatus: "CLEARED_BY_SETTLEMENT",
-      source: settlementEvidence(settlementFile),
-      agent: "AfterPaymentSubmissionAgent",
-      reason: "Trace number present in cleared trace list for this cycle",
-    });
-  } else if (finalStatus === "WITH BENEFICIARY BANK") {
-    base.push({
-      timestamp: `${cycleTime}:46`,
-      status: "WITH BENEFICIARY BANK",
-      internalStatus: "WITH_BENEFICIARY_BANK_PENDING",
-      source: settlementEvidence(settlementFile),
+      timestamp: "11:00:48",
+      status: "REJECTED BY SCHEME",
+      internalStatus: "REJECTED_BY_SCHEME_FILE",
+      source: schemeRejectEvidence(SCHEME_REJECT_11_00),
       agent: "AfterPaymentSubmissionAgent",
       reason:
-        "Submitted to scheme but trace not present in settlement and no return received",
+        "Scheme reject file matched this payment; status moved to WITH BANK / REJECTED BY SCHEME",
     });
-  } else if (finalStatus === "REJECTED") {
+    return base;
+  }
+
+  base.push({
+    timestamp: "11:00:52",
+    status: "WITH BENEFICIARY BANK",
+    internalStatus: "WITH_BENEFICIARY_BANK_PENDING",
+    source: settlementSummaryEvidence(SETTLEMENT_11_00),
+    agent: "AfterPaymentSubmissionAgent",
+    reason:
+      "Settlement summary evidence received. Payment moved to WITH BENEFICIARY BANK; no payment-level clearing is claimed.",
+  });
+
+  if (seed.outcome === "REJECTED_BY_BENEFICIARY_BANK" && seed.returnCode) {
     base.push({
-      timestamp: `${cycleTime}:46`,
-      status: "WITH BENEFICIARY BANK",
-      internalStatus: "WITH_BENEFICIARY_BANK_PENDING",
-      source: settlementEvidence(settlementFile),
-      agent: "AfterPaymentSubmissionAgent",
+      timestamp: "11:04:18",
+      status: "REJECTED BY BENEFICIARY BANK",
+      internalStatus: "REJECTED_BY_RETURN_FILE",
+      source: returnEvidence(RETURN_11_04, seed.returnCode),
+      agent: "ReturnFileAgent",
       reason:
-        "Submitted to scheme but trace not present in settlement — awaiting return or clearing",
+        "NACHA return file matched original trace after beneficiary-bank stage",
     });
-    if (returnFile && seed.returnCode) {
-      base.push({
-        timestamp: "10:02:35",
-        status: "REJECTED",
-        internalStatus: "REJECTED_BY_RETURN_FILE",
-        source: returnEvidence(returnFile, seed.returnCode),
-        agent: "ReturnFileAgent",
-        reason: `NACHA return code ${seed.returnCode} received; original trace matched`,
-      });
-    }
   }
 
   return base;
 }
 
-function buildPayment(
-  seed: PaymentSeed,
-  batchId: string,
-  cycleTime: string,
-  ccdFile: string,
-  settlementFile: string,
-  returnFile: string | undefined,
-): PaymentRecord {
+function buildPayment(seed: PaymentSeed): PaymentRecord {
   const customer = CUSTOMERS[seed.customerIndex];
-  const isRejected = returnFile !== undefined && cycle1RejectedByCycle2.has(seed.trace);
-  const outcome: PaymentRecord["currentStatus"] = isRejected
-    ? "REJECTED"
-    : seed.outcome === "CLEARED"
-      ? "CLEARED"
-      : seed.outcome === "WITH_BENEFICIARY_BANK"
-        ? "WITH BENEFICIARY BANK"
-        : "REJECTED";
-
-  const returnCode = isRejected
-    ? seed.trace.endsWith("19")
-      ? "R01"
-      : "R03"
-    : seed.returnCode;
-
-  const enrichedSeed: PaymentSeed = { ...seed, returnCode };
-  const history = buildStatusHistory(
-    enrichedSeed,
-    batchId,
-    cycleTime,
-    ccdFile,
-    settlementFile,
-    isRejected ? returnFile : undefined,
-    outcome,
-  );
-
-  const internal = history[history.length - 1].internalStatus;
-  const evidence: EvidenceRef[] = history.map((h) => h.source);
+  const history = buildStatusHistory(seed);
+  const final = history[history.length - 1];
 
   return {
     paymentId: `PAY-${seed.trace}`,
     traceNumber: seed.trace,
-    batchId,
-    cycleTime,
-    sourceFile: ccdFile,
+    batchId: BATCH_11_00,
+    cycleTime: "11:00",
+    sourceFile: CCD_11_00,
     companyId: "COMP-9001",
     customerId: customer.id,
     customerName: customer.name,
     beneficiaryName: BENEFICIARIES[seed.beneficiaryIndex],
     receivingDfi: customer.dfi,
     maskedAccount: customer.account,
-    amount: Number(seed.amount.toFixed(2)),
+    amount: seed.amount,
     currency: "USD",
-    currentStatus: outcome,
-    internalStatus: internal,
-    statusSince: history[history.length - 1].timestamp,
+    currentStatus: final.status,
+    internalStatus: final.internalStatus,
+    statusSince: final.timestamp,
     statusHistory: history,
-    returnReasonCode: returnCode,
+    returnReasonCode: seed.returnCode,
     riskLevel: seed.riskLevel ?? "LOW",
     riskReason: seed.riskReason,
     recommendedAction:
-      outcome === "REJECTED"
-        ? returnCode === "R01"
-          ? "Contact customer to confirm funding, then re-originate."
-          : "Verify beneficiary account details before re-origination."
-        : outcome === "WITH BENEFICIARY BANK"
-          ? "No action required. Awaiting settlement or return."
-          : "None. Payment cleared normally.",
+      final.status === "REJECTED BY SCHEME"
+        ? "Review scheme reject detail and correct file content before re-submission."
+        : final.status === "REJECTED BY BENEFICIARY BANK"
+          ? "Contact customer and beneficiary to resolve return reason before retry."
+          : "Await beneficiary-bank confirmation or later return-file evidence.",
     customerFriendlyMessage:
-      outcome === "REJECTED"
-        ? returnCode === "R01"
-          ? "The payment could not complete because the receiving account had insufficient funds."
-          : "The payment could not complete because the receiving account details did not match."
-        : outcome === "WITH BENEFICIARY BANK"
-          ? "The payment has reached the beneficiary bank and is awaiting confirmation."
-          : "The payment was completed successfully.",
-    evidence,
+      final.status === "REJECTED BY SCHEME"
+        ? "The payment was rejected by the scheme before beneficiary-bank processing."
+        : final.status === "REJECTED BY BENEFICIARY BANK"
+          ? "The payment reached the beneficiary bank but was later returned."
+          : "The payment has been sent onward and is currently with the beneficiary bank.",
+    evidence: history.map((h) => h.source),
   };
 }
 
-const CYCLE1_BATCH = "BATCH-2026-07-01-10-00";
-const CYCLE2_BATCH = "BATCH-2026-07-01-10-02";
-const CYCLE1_CCD = "customer-upload-1000.ccd";
-const CYCLE2_CCD = "customer-upload-1002.ccd";
-const CYCLE1_SETTLE = "settlement-1000.fedach";
-const CYCLE2_SETTLE = "settlement-1002.fedach";
-const CYCLE2_RETURN = "return-1002.nacha";
-
-const cycle1Payments = cycle1Seeds.map((s) =>
-  buildPayment(s, CYCLE1_BATCH, "10:00", CYCLE1_CCD, CYCLE1_SETTLE, CYCLE2_RETURN),
-);
-
-const cycle2Payments = cycle2Seeds.map((s) =>
-  buildPayment(s, CYCLE2_BATCH, "10:02", CYCLE2_CCD, CYCLE2_SETTLE, undefined),
-);
-
-const allPayments: PaymentRecord[] = [...cycle1Payments, ...cycle2Payments];
+const allPayments: PaymentRecord[] = paymentSeeds.map(buildPayment);
 
 // ---------------------------------------------------------------------------
 // Aggregations
@@ -316,225 +265,201 @@ function summarizeBatch(batchId: string, cycleTime: string, sourceFile: string):
     sourceFile,
     paymentCount: rows.length,
     withBank: count("WITH BANK"),
-    withScheme: count("WITH SCHEME"),
+    sentToScheme: count("SENT TO SCHEME"),
     withBeneficiaryBank: count("WITH BENEFICIARY BANK"),
-    cleared: count("CLEARED"),
-    rejected: count("REJECTED"),
+    rejectedByScheme: count("REJECTED BY SCHEME"),
+    rejectedByBeneficiaryBank: count("REJECTED BY BENEFICIARY BANK"),
   };
 }
 
 function summarizeCustomers(): CustomerSummary[] {
   const byCustomer = new Map<string, PaymentRecord[]>();
-  for (const p of allPayments) {
-    const list = byCustomer.get(p.customerId) ?? [];
-    list.push(p);
-    byCustomer.set(p.customerId, list);
+  for (const payment of allPayments) {
+    const list = byCustomer.get(payment.customerId) ?? [];
+    list.push(payment);
+    byCustomer.set(payment.customerId, list);
   }
+
   return Array.from(byCustomer.entries()).map(([customerId, rows]) => {
-    const cleared = rows.filter((r) => r.currentStatus === "CLEARED").length;
-    const rejected = rows.filter((r) => r.currentStatus === "REJECTED").length;
+    const rejectedByScheme = rows.filter((r) => r.currentStatus === "REJECTED BY SCHEME").length;
+    const rejectedByBeneficiaryBank = rows.filter(
+      (r) => r.currentStatus === "REJECTED BY BENEFICIARY BANK",
+    ).length;
     const withBeneficiaryBank = rows.filter(
       (r) => r.currentStatus === "WITH BENEFICIARY BANK",
     ).length;
+    const sentToScheme = rows.filter((r) => r.currentStatus === "SENT TO SCHEME").length;
     const lastRejection = rows
-      .filter((r) => r.currentStatus === "REJECTED")
+      .filter(
+        (r) =>
+          r.currentStatus === "REJECTED BY SCHEME" ||
+          r.currentStatus === "REJECTED BY BENEFICIARY BANK",
+      )
       .map((r) => r.statusSince)
       .sort()
       .at(-1);
+
     return {
       customerId,
       customerName: rows[0].customerName,
       totalPayments: rows.length,
-      cleared,
-      rejected,
+      sentToScheme,
       withBeneficiaryBank,
+      rejectedByScheme,
+      rejectedByBeneficiaryBank,
       lastRejectionDate: lastRejection,
-      historicalRejectionCount: rejected + (customerId === "CUS-1004" ? 2 : 0),
+      historicalRejectionCount:
+        rejectedByScheme + rejectedByBeneficiaryBank + (customerId === "CUS-3003" ? 1 : 0),
     };
   });
 }
 
 const simulationState: SimulationState = {
   scenarioId: scenarios[0].id,
-  currentSimTime: "10:02",
-  activeCycle: "10:02",
+  currentSimTime: "11:04",
+  activeCycle: "11:04",
   plan: [
     {
-      cycleTime: "10:00",
-      label: "Upload 20-payment CCD, settle 18, hold 2",
-      ccdFile: CYCLE1_CCD,
-      expectedCleared: 18,
-      expectedWithBeneficiaryBank: 2,
-      expectedRejectedFromPriorCycle: 0,
+      cycleTime: "11:00",
+      label: "Upload 4 x $100 CCD entries; settlement summary $300 and scheme reject $100",
+      ccdFile: CCD_11_00,
+      settlementFile: SETTLEMENT_11_00,
+      schemeRejectFile: SCHEME_REJECT_11_00,
+      expectedMovedToBeneficiaryBank: 3,
+      expectedRejectedByScheme: 1,
+      expectedRejectedByBeneficiaryBank: 0,
     },
     {
-      cycleTime: "10:02",
-      label: "Upload 15-payment CCD, settle 12, return file rejects 2 prior",
-      ccdFile: CYCLE2_CCD,
-      returnFile: CYCLE2_RETURN,
-      expectedCleared: 12,
-      expectedWithBeneficiaryBank: 3,
-      expectedRejectedFromPriorCycle: 2,
+      cycleTime: "11:04",
+      label: "NACHA return file matches 1 prior payment from beneficiary-bank stage",
+      returnFile: RETURN_11_04,
+      expectedMovedToBeneficiaryBank: 2,
+      expectedRejectedByScheme: 1,
+      expectedRejectedByBeneficiaryBank: 1,
     },
     {
-      cycleTime: "10:04",
-      label: "Awaiting further batches (not yet run)",
-      expectedCleared: 0,
-      expectedWithBeneficiaryBank: 0,
-      expectedRejectedFromPriorCycle: 0,
-    },
-    {
-      cycleTime: "10:06",
-      label: "Awaiting further batches (not yet run)",
-      expectedCleared: 0,
-      expectedWithBeneficiaryBank: 0,
-      expectedRejectedFromPriorCycle: 0,
+      cycleTime: "11:08",
+      label: "Awaiting next cycle",
+      expectedMovedToBeneficiaryBank: 2,
+      expectedRejectedByScheme: 1,
+      expectedRejectedByBeneficiaryBank: 1,
     },
   ],
   runs: [
     {
-      cycleTime: "10:00",
+      cycleTime: "11:00",
       status: "COMPLETE",
-      paymentsCreated: 20,
-      cleared: 18,
-      withBeneficiaryBank: 2,
-      rejectedFromPriorCycle: 0,
-      ranAt: "10:00:00",
+      paymentsCreated: 4,
+      movedToBeneficiaryBank: 3,
+      rejectedByScheme: 1,
+      rejectedByBeneficiaryBank: 0,
+      ranAt: "11:00:00",
     },
     {
-      cycleTime: "10:02",
+      cycleTime: "11:04",
       status: "COMPLETE",
-      paymentsCreated: 15,
-      cleared: 12,
-      withBeneficiaryBank: 3,
-      rejectedFromPriorCycle: 2,
-      ranAt: "10:02:00",
+      paymentsCreated: 0,
+      movedToBeneficiaryBank: 2,
+      rejectedByScheme: 1,
+      rejectedByBeneficiaryBank: 1,
+      ranAt: "11:04:00",
     },
     {
-      cycleTime: "10:04",
+      cycleTime: "11:08",
       status: "PENDING",
       paymentsCreated: 0,
-      cleared: 0,
-      withBeneficiaryBank: 0,
-      rejectedFromPriorCycle: 0,
-    },
-    {
-      cycleTime: "10:06",
-      status: "PENDING",
-      paymentsCreated: 0,
-      cleared: 0,
-      withBeneficiaryBank: 0,
-      rejectedFromPriorCycle: 0,
+      movedToBeneficiaryBank: 0,
+      rejectedByScheme: 0,
+      rejectedByBeneficiaryBank: 0,
     },
   ],
   summary: {
     totalPayments: allPayments.length,
     withBank: allPayments.filter((p) => p.currentStatus === "WITH BANK").length,
-    withScheme: allPayments.filter((p) => p.currentStatus === "WITH SCHEME").length,
+    sentToScheme: allPayments.filter((p) => p.currentStatus === "SENT TO SCHEME").length,
     withBeneficiaryBank: allPayments.filter(
       (p) => p.currentStatus === "WITH BENEFICIARY BANK",
     ).length,
-    cleared: allPayments.filter((p) => p.currentStatus === "CLEARED").length,
-    rejected: allPayments.filter((p) => p.currentStatus === "REJECTED").length,
+    rejectedByScheme: allPayments.filter((p) => p.currentStatus === "REJECTED BY SCHEME").length,
+    rejectedByBeneficiaryBank: allPayments.filter(
+      (p) => p.currentStatus === "REJECTED BY BENEFICIARY BANK",
+    ).length,
   },
   events: [
     {
-      timestamp: "10:00:05",
-      cycleTime: "10:00",
+      timestamp: "11:00:05",
+      cycleTime: "11:00",
       agent: "BeforePaymentSubmissionAgent",
-      message: `Parsed ${CYCLE1_CCD}: 20 entry details, 0 syntax errors, 2 historical-risk flags`,
+      message: `${CCD_11_00}: 4 payments parsed at $100 each, syntax validation passed`,
     },
     {
-      timestamp: "10:00:20",
-      cycleTime: "10:00",
+      timestamp: "11:00:18",
+      cycleTime: "11:00",
       agent: "AfterPaymentSubmissionAgent",
-      message: "Processing engine acknowledged submission of 20 entries to scheme",
+      message: "4 payments moved to SENT TO SCHEME",
     },
     {
-      timestamp: "10:00:45",
-      cycleTime: "10:00",
+      timestamp: "11:00:52",
+      cycleTime: "11:00",
       agent: "AfterPaymentSubmissionAgent",
       message:
-        "Settlement report loaded: 18 traces cleared, 2 traces not present — held as WITH BENEFICIARY BANK",
+        "Settlement summary ($300) and scheme reject file ($100) applied: 3 WITH BENEFICIARY BANK, 1 REJECTED BY SCHEME",
     },
     {
-      timestamp: "10:02:05",
-      cycleTime: "10:02",
-      agent: "BeforePaymentSubmissionAgent",
-      message: `Parsed ${CYCLE2_CCD}: 15 entry details, 0 syntax errors, 1 historical-risk flag`,
-    },
-    {
-      timestamp: "10:02:35",
-      cycleTime: "10:02",
+      timestamp: "11:04:18",
+      cycleTime: "11:04",
       agent: "ReturnFileAgent",
       message:
-        "NACHA return file processed: 2 original traces from 10:00 batch matched (R01, R03) — status set to REJECTED",
+        "Return file matched one prior trace: status moved to REJECTED BY BENEFICIARY BANK",
     },
     {
-      timestamp: "10:02:45",
-      cycleTime: "10:02",
-      agent: "AfterPaymentSubmissionAgent",
+      timestamp: "11:04:25",
+      cycleTime: "11:04",
+      agent: "AIExplanationAgent",
       message:
-        "Settlement report loaded: 12 traces cleared, 3 traces held as WITH BENEFICIARY BANK",
+        "Generated evidence-based explanations; no payment-level clearing is claimed from summary settlement",
     },
   ],
 };
 
 const agentTrace: AgentTraceStep[] = [
   {
-    timestamp: "10:00:05",
+    timestamp: "11:00:05",
     agent: "BeforePaymentSubmissionAgent",
     action: "parse_ccd",
-    detail: `${CYCLE1_CCD}: 1 file header, 1 batch header, 20 entry details, 1 batch control, 1 file control`,
+    detail: `${CCD_11_00}: parsed 4 entry detail records`,
   },
   {
-    timestamp: "10:00:07",
+    timestamp: "11:00:10",
     agent: "BeforePaymentSubmissionAgent",
     action: "syntax_validate",
-    detail: "All 20 records passed syntax validation",
+    detail: "Bank-side syntax validation passed for all 4 records",
   },
   {
-    timestamp: "10:00:09",
-    agent: "BeforePaymentSubmissionAgent",
-    action: "historical_risk_scan",
-    detail: "Flagged 2 payments (1 MEDIUM, 1 HIGH) based on prior returns",
-  },
-  {
-    timestamp: "10:00:20",
+    timestamp: "11:00:18",
     agent: "AfterPaymentSubmissionAgent",
     action: "submit_to_scheme",
-    detail: "Processing engine acknowledged 20/20 entries",
+    detail: "4 payments set to SENT TO SCHEME",
   },
   {
-    timestamp: "10:00:45",
+    timestamp: "11:00:48",
     agent: "AfterPaymentSubmissionAgent",
-    action: "reconcile_settlement",
-    detail: "18 cleared, 2 held WITH BENEFICIARY BANK (no settlement, no return)",
+    action: "apply_settlement_and_scheme_reject",
+    detail:
+      `Settlement summary ${SETTLEMENT_11_00} ($300) and scheme reject ${SCHEME_REJECT_11_00} ($100) processed`,
   },
   {
-    timestamp: "10:02:05",
-    agent: "BeforePaymentSubmissionAgent",
-    action: "parse_ccd",
-    detail: `${CYCLE2_CCD}: 15 entry details parsed`,
-  },
-  {
-    timestamp: "10:02:35",
+    timestamp: "11:04:18",
     agent: "ReturnFileAgent",
     action: "match_returns",
-    detail:
-      "2 returns matched to original traces 1000010019 (R01) and 1000010020 (R03) from 10:00 batch",
+    detail: `Return file ${RETURN_11_04} matched trace 110000003 (R01)`,
   },
   {
-    timestamp: "10:02:45",
-    agent: "AfterPaymentSubmissionAgent",
-    action: "reconcile_settlement",
-    detail: "12 cleared, 3 held WITH BENEFICIARY BANK",
-  },
-  {
-    timestamp: "10:02:50",
+    timestamp: "11:04:25",
     agent: "AIExplanationAgent",
-    action: "explain_rejections",
-    detail: "Generated customer-safe messages for 2 rejected payments (R01, R03)",
+    action: "explain_statuses",
+    detail:
+      "Produced payment explanations with explicit settlement-summary limitations",
   },
 ];
 
@@ -590,16 +515,13 @@ export const api = {
 
   getBatchDashboard(): Promise<DashboardResponse<BatchSummary>> {
     return delay({
-      generatedAt: "10:02:50",
-      rows: [
-        summarizeBatch(CYCLE1_BATCH, "10:00", CYCLE1_CCD),
-        summarizeBatch(CYCLE2_BATCH, "10:02", CYCLE2_CCD),
-      ],
+      generatedAt: "11:04:25",
+      rows: [summarizeBatch(BATCH_11_00, "11:00", CCD_11_00)],
     });
   },
 
   getCustomerDashboard(): Promise<DashboardResponse<CustomerSummary>> {
-    return delay({ generatedAt: "10:02:50", rows: summarizeCustomers() });
+    return delay({ generatedAt: "11:04:25", rows: summarizeCustomers() });
   },
 
   listPayments(): Promise<PaymentRecord[]> {

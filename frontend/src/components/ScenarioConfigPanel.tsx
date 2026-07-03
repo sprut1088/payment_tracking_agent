@@ -3,12 +3,14 @@ import { api } from "../api/client";
 import type { Scenario } from "../types/api";
 
 interface ScenarioConfigPanelProps {
+  demoMode?: boolean;
   onScenarioChange?: (scenarioId: string) => void;
   onRunNextCycle?: () => void;
   onReset?: () => void;
 }
 
 export function ScenarioConfigPanel({
+  demoMode = true,
   onScenarioChange,
   onRunNextCycle,
   onReset,
@@ -91,7 +93,9 @@ export function ScenarioConfigPanel({
           Reset simulation
         </button>
         <span className="action-row__hint">
-          (Mock actions — orchestrator is added in a later prompt.)
+          {demoMode
+            ? "Demo Mode ON: scripted SME-aligned mock story."
+            : "Demo Mode OFF: use local-folder backend controls below for real ensure/scan/check actions."}
         </span>
       </div>
     </section>

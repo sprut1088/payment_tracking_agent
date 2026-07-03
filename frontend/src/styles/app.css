@@ -161,6 +161,56 @@ button {
   overflow-x: auto;
 }
 
+.shell__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.demo-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.3rem 0.4rem 0.3rem 0.75rem;
+  cursor: pointer;
+}
+
+.demo-mode-toggle__label {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.demo-mode-toggle__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+
+.demo-mode-toggle__pill--on {
+  background: rgba(52, 211, 153, 0.2);
+  color: #a7f3d0;
+  border: 1px solid rgba(52, 211, 153, 0.45);
+}
+
+.demo-mode-toggle__pill--off {
+  background: rgba(248, 113, 113, 0.2);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+}
+
 /* ---------------- Page ---------------- */
 
 .page {
@@ -564,7 +614,7 @@ button {
   border-color: rgba(56, 189, 248, 0.35);
 }
 
-.status-badge--with-scheme {
+.status-badge--sent-scheme {
   background: rgba(167, 139, 250, 0.16);
   color: #c4b5fd;
   border-color: rgba(167, 139, 250, 0.35);
@@ -576,16 +626,16 @@ button {
   border-color: rgba(251, 191, 36, 0.35);
 }
 
-.status-badge--cleared {
-  background: rgba(52, 211, 153, 0.16);
-  color: #6ee7b7;
-  border-color: rgba(52, 211, 153, 0.35);
-}
-
-.status-badge--rejected {
+.status-badge--rejected-scheme {
   background: rgba(248, 113, 113, 0.16);
   color: #fca5a5;
   border-color: rgba(248, 113, 113, 0.35);
+}
+
+.status-badge--rejected-beneficiary {
+  background: rgba(251, 146, 60, 0.18);
+  color: #fdba74;
+  border-color: rgba(251, 146, 60, 0.42);
 }
 
 /* ---------------- Timeline ---------------- */
@@ -878,6 +928,12 @@ button {
   color: var(--text-muted);
 }
 
+.table__note {
+  margin: 0.75rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
 /* ---------------- Batch / customer cards ---------------- */
 
 .batch-summary,
@@ -965,12 +1021,20 @@ button {
   color: #6ee7b7;
 }
 
+.text-info {
+  color: #93c5fd;
+}
+
 .text-warn {
   color: #fcd34d;
 }
 
 .text-danger {
   color: #fca5a5;
+}
+
+.text-danger-2 {
+  color: #fdba74;
 }
 
 /* ---------------- Risk ---------------- */
@@ -1176,6 +1240,12 @@ button {
 .evidence__title {
   margin: 0 0 0.5rem;
   font-size: 0.95rem;
+}
+
+.evidence__caveat {
+  margin: 0 0 0.55rem;
+  color: var(--text-dim);
+  font-size: 0.78rem;
 }
 
 .evidence__list {

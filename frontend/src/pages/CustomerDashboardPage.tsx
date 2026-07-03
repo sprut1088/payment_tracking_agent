@@ -14,7 +14,7 @@ export function CustomerDashboardPage() {
           <h1 className="page__title">Customer Dashboard</h1>
           <p className="page__subtitle">
             All payments for a customer across batches and dates, with historical
-            rejection context.
+            rejection context. Demo Mode ON uses the scripted SME-aligned story.
           </p>
         </div>
       </header>

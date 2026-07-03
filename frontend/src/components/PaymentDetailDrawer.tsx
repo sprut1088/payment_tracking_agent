@@ -96,8 +96,9 @@ export function PaymentDetailDrawer({ payment, onClose }: PaymentDetailDrawerPro
               <div>{payment.recommendedAction ?? "—"}</div>
             </div>
             <p className="explanation__caveat">
-              Generated deterministically from evidence. AI-authored explanations
-              are wired to the AIExplanationAgent in a later prompt.
+              Explanations are deterministic and evidence-based. Settlement
+              summary entries are treated as aggregate evidence and do not claim
+              payment-level clearing.
             </p>
           </div>
         </section>

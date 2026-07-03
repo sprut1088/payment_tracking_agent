@@ -15,8 +15,8 @@ export function CycleTimeline({ plan, runs, activeCycle }: CycleTimelineProps) {
         <h2 className="card__title">Cycle timeline</h2>
         <p className="card__subtitle">
           Configured cycles for this scenario. Each dot represents one batch
-          cycle. Real bank cycles are 10:00 / 14:00 / 18:00 GMT; the demo
-          accelerates them.
+          cycle. This story follows SME-confirmed settlement-summary and reject
+          handling without claiming payment-level clearing.
         </p>
       </header>
       <ol className="timeline">
@@ -42,19 +42,24 @@ export function CycleTimeline({ plan, runs, activeCycle }: CycleTimelineProps) {
                 {(entry.ccdFile || entry.returnFile) && (
                   <div className="timeline__meta">
                     {entry.ccdFile && <span>CCD: {entry.ccdFile}</span>}
+                    {entry.settlementFile && (
+                      <span>Settlement: {entry.settlementFile}</span>
+                    )}
+                    {entry.schemeRejectFile && (
+                      <span>Scheme reject: {entry.schemeRejectFile}</span>
+                    )}
                     {entry.returnFile && <span>Return: {entry.returnFile}</span>}
                   </div>
                 )}
                 {run && run.status === "COMPLETE" && (
                   <div className="timeline__metrics">
                     <span>+{run.paymentsCreated} payments</span>
-                    <span>{run.cleared} cleared</span>
-                    <span>{run.withBeneficiaryBank} held</span>
-                    {run.rejectedFromPriorCycle > 0 && (
-                      <span>
-                        {run.rejectedFromPriorCycle} prior rejected by return
-                      </span>
-                    )}
+                    <span>{run.movedToBeneficiaryBank} moved to beneficiary bank</span>
+                    <span>{run.rejectedByScheme} rejected by scheme</span>
+                    <span>
+                      {run.rejectedByBeneficiaryBank} rejected by beneficiary
+                      bank
+                    </span>
                   </div>
                 )}
               </div>

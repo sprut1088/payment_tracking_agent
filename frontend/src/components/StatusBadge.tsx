@@ -9,10 +9,11 @@ interface StatusBadgeProps {
 
 const statusToClass: Record<BusinessStatus, string> = {
   "WITH BANK": "status-badge status-badge--with-bank",
-  "WITH SCHEME": "status-badge status-badge--with-scheme",
+  "SENT TO SCHEME": "status-badge status-badge--sent-scheme",
   "WITH BENEFICIARY BANK": "status-badge status-badge--with-beneficiary",
-  CLEARED: "status-badge status-badge--cleared",
-  REJECTED: "status-badge status-badge--rejected",
+  "REJECTED BY SCHEME": "status-badge status-badge--rejected-scheme",
+  "REJECTED BY BENEFICIARY BANK":
+    "status-badge status-badge--rejected-beneficiary",
 };
 
 export function StatusBadge({ status, size = "md", icon }: StatusBadgeProps) {

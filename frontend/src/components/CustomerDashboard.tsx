@@ -37,7 +37,8 @@ export function CustomerDashboard({ onSelectPayment }: CustomerDashboardProps) {
       <header className="card__header">
         <h2 className="card__title">Customer dashboard</h2>
         <p className="card__subtitle">
-          All payments for a customer across batches and dates.
+          All payments for a customer across batches and dates, with
+          evidence-backed status outcomes.
         </p>
       </header>
 
@@ -56,9 +57,12 @@ export function CustomerDashboard({ onSelectPayment }: CustomerDashboardProps) {
             <div className="customer-card__id">{c.customerId}</div>
             <div className="customer-card__metrics">
               <span>{c.totalPayments} total</span>
-              <span className="text-success">{c.cleared} cleared</span>
-              <span className="text-warn">{c.withBeneficiaryBank} held</span>
-              <span className="text-danger">{c.rejected} rejected</span>
+              <span className="text-info">{c.sentToScheme} sent to scheme</span>
+              <span className="text-warn">{c.withBeneficiaryBank} with beneficiary bank</span>
+              <span className="text-danger">{c.rejectedByScheme} rejected by scheme</span>
+              <span className="text-danger-2">
+                {c.rejectedByBeneficiaryBank} rejected by beneficiary bank
+              </span>
             </div>
             <div className="customer-card__history">
               Historical rejections: <strong>{c.historicalRejectionCount}</strong>
@@ -112,6 +116,9 @@ export function CustomerDashboard({ onSelectPayment }: CustomerDashboardProps) {
           </tbody>
         </table>
       </div>
+      <p className="table__note">
+        Use payment detail to see the evidence explanation behind each status.
+      </p>
     </section>
   );
 }

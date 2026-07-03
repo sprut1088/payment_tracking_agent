@@ -31,7 +31,8 @@ export function PaymentSearchPage() {
           <h1 className="page__title">Payment Search</h1>
           <p className="page__subtitle">
             Find a single payment by trace number, payment ID, customer, or
-            beneficiary. Every match includes an evidence-backed status timeline.
+            beneficiary. Every match includes an evidence-backed status
+            timeline. Demo Mode ON uses scripted SME-aligned mock records.
           </p>
         </div>
       </header>

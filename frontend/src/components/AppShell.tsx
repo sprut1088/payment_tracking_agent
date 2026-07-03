@@ -5,6 +5,8 @@ export type NavKey = "simulator" | "batch" | "customer" | "search";
 interface AppShellProps {
   activeNav: NavKey;
   onNavigate: (key: NavKey) => void;
+  demoMode: boolean;
+  onToggleDemoMode: () => void;
   children: ReactNode;
 }
 
@@ -15,7 +17,13 @@ const NAV_ITEMS: Array<{ key: NavKey; label: string; hint: string }> = [
   { key: "search", label: "Payment Search", hint: "Find one payment and its evidence" },
 ];
 
-export function AppShell({ activeNav, onNavigate, children }: AppShellProps) {
+export function AppShell({
+  activeNav,
+  onNavigate,
+  demoMode,
+  onToggleDemoMode,
+  children,
+}: AppShellProps) {
   return (
     <div className="shell">
       <aside className="shell__sidebar">
@@ -44,12 +52,33 @@ export function AppShell({ activeNav, onNavigate, children }: AppShellProps) {
         <div className="shell__footer">
           <div className="shell__footer-title">Demo mode</div>
           <div className="shell__footer-body">
-            Dashboards remain fixture-driven, while local folder controls now
-            call backend /api/demo-flow endpoints.
+            {demoMode
+              ? "ON: scripted SME-aligned mock story is active."
+              : "OFF: local folder controls call backend /api/demo-flow endpoints."}
           </div>
         </div>
       </aside>
-      <main className="shell__main">{children}</main>
+      <main className="shell__main">
+        <div className="shell__toolbar">
+          <button
+            type="button"
+            className="demo-mode-toggle"
+            aria-pressed={demoMode}
+            onClick={onToggleDemoMode}
+          >
+            <span className="demo-mode-toggle__label">Demo Mode</span>
+            <span
+              className={
+                "demo-mode-toggle__pill" +
+                (demoMode ? " demo-mode-toggle__pill--on" : " demo-mode-toggle__pill--off")
+              }
+            >
+              {demoMode ? "ON" : "OFF"}
+            </span>
+          </button>
+        </div>
+        {children}
+      </main>
     </div>
   );
 }

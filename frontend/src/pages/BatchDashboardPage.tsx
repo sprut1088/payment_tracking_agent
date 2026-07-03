@@ -14,7 +14,8 @@ export function BatchDashboardPage() {
           <h1 className="page__title">Batch Dashboard</h1>
           <p className="page__subtitle">
             Payments grouped by batch and cycle. Click a payment to inspect
-            evidence and its status timeline.
+            evidence and its status timeline. In Demo Mode ON, this dashboard
+            uses predefined SME-aligned mock data.
           </p>
         </div>
       </header>
