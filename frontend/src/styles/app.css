@@ -556,6 +556,54 @@ button {
   }
 }
 
+.local-flow__ledger-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.local-flow__section-subtitle {
+  margin: 0 0 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.local-flow__ledger-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.local-flow__ledger-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+
+.local-flow__ledger-count-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.local-flow__ledger-asof {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.local-flow__ledger-evidence {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 /* ---------------- Status board ---------------- */
 
 .status-board {

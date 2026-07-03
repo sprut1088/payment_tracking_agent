@@ -223,3 +223,38 @@ export interface DemoFlowConfig {
   returns_delay_seconds: number;
   poll_interval_seconds: number;
 }
+
+export type LedgerPaymentStatus = BusinessStatus;
+
+export interface LedgerPaymentEvidence {
+  source: string;
+  summary: string;
+  recorded_at: string;
+}
+
+export interface LedgerPaymentStatusEvent {
+  status: LedgerPaymentStatus;
+  at: string;
+  evidence: LedgerPaymentEvidence;
+}
+
+export interface LedgerPayment {
+  payment_id: string;
+  batch_key: string;
+  source_file: string;
+  trace_number: string;
+  transaction_code: string;
+  receiving_dfi_identification: string;
+  masked_account_number: string;
+  amount_cents: number;
+  individual_id_number: string;
+  individual_name: string;
+  current_status: LedgerPaymentStatus;
+  status_history: LedgerPaymentStatusEvent[];
+  evidence: LedgerPaymentEvidence[];
+}
+
+export interface PaymentLedgerView {
+  as_of: string;
+  payments: LedgerPayment[];
+}

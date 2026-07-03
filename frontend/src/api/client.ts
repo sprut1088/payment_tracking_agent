@@ -11,6 +11,7 @@ import type {
   DemoFlowState,
   DashboardResponse,
   EvidenceRef,
+  PaymentLedgerView,
   PaymentRecord,
   Scenario,
   SimulationState,
@@ -578,6 +579,10 @@ export const api = {
 
   getDemoFlowState(): Promise<DemoFlowState> {
     return requestJson<DemoFlowState>("/api/demo-flow/state");
+  },
+
+  getDemoFlowPayments(): Promise<PaymentLedgerView> {
+    return requestJson<PaymentLedgerView>("/api/demo-flow/payments");
   },
 
   resetDemoFlow(): Promise<void> {

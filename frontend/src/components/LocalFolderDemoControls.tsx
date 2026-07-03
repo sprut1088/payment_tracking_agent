@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { StatusBadge } from "./StatusBadge";
 import type {
   DemoFlowBatch,
   DemoFlowBatchStatus,
   DemoFlowConfig,
   DemoFlowScanResult,
   DemoFlowState,
+  LedgerPayment,
+  LedgerPaymentStatus,
+  PaymentLedgerView,
   SettlementSchemeEvidenceStatus,
 } from "../types/api";
 
@@ -13,6 +17,21 @@ function formatTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function formatDollars(amountCents: number): string {
+  return (amountCents / 100).toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+  });
+}
+
+function latestEvidenceSummary(payment: LedgerPayment): string {
+  const history = payment.status_history;
+  if (history.length > 0) return history[history.length - 1].evidence.summary;
+  const evidence = payment.evidence;
+  if (evidence.length > 0) return evidence[evidence.length - 1].summary;
+  return "";
 }
 
 function batchStatusLabel(status: DemoFlowBatchStatus): string {
@@ -47,30 +66,55 @@ function sortBatchesNewestFirst(rows: DemoFlowBatch[]): DemoFlowBatch[] {
   return [...rows].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
 }
 
+function sortPaymentsByPaymentId(rows: LedgerPayment[]): LedgerPayment[] {
+  return [...rows].sort((a, b) => a.payment_id.localeCompare(b.payment_id));
+}
+
+const LEDGER_STATUS_ORDER: LedgerPaymentStatus[] = [
+  "WITH BANK",
+  "SENT TO SCHEME",
+  "WITH BENEFICIARY BANK",
+  "REJECTED BY SCHEME",
+  "REJECTED BY BENEFICIARY BANK",
+];
+
 export function LocalFolderDemoControls() {
   const [config, setConfig] = useState<DemoFlowConfig | null>(null);
   const [flowState, setFlowState] = useState<DemoFlowState | null>(null);
+  const [ledger, setLedger] = useState<PaymentLedgerView | null>(null);
   const [lastScan, setLastScan] = useState<DemoFlowScanResult | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  const refreshPayments = useCallback(async () => {
+    const view = await api.getDemoFlowPayments();
+    setLedger(view);
+  }, []);
+
   const refresh = useCallback(async () => {
-    const [cfg, state] = await Promise.all([
+    const [cfg, state, payments] = await Promise.all([
       api.getDemoFlowConfig(),
       api.getDemoFlowState(),
+      api.getDemoFlowPayments(),
     ]);
     setConfig(cfg);
     setFlowState(state);
+    setLedger(payments);
   }, []);
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([api.getDemoFlowConfig(), api.getDemoFlowState()])
-      .then(([cfg, state]) => {
+    Promise.all([
+      api.getDemoFlowConfig(),
+      api.getDemoFlowState(),
+      api.getDemoFlowPayments(),
+    ])
+      .then(([cfg, state, payments]) => {
         if (!mounted) return;
         setConfig(cfg);
         setFlowState(state);
+        setLedger(payments);
       })
       .catch((err: unknown) => {
         if (!mounted) return;
@@ -115,6 +159,25 @@ export function LocalFolderDemoControls() {
     };
   }, [flowState]);
 
+  const ledgerPayments = useMemo(
+    () => sortPaymentsByPaymentId(ledger?.payments ?? []),
+    [ledger?.payments],
+  );
+
+  const ledgerCounts = useMemo(() => {
+    const counts: Record<LedgerPaymentStatus, number> = {
+      "WITH BANK": 0,
+      "SENT TO SCHEME": 0,
+      "WITH BENEFICIARY BANK": 0,
+      "REJECTED BY SCHEME": 0,
+      "REJECTED BY BENEFICIARY BANK": 0,
+    };
+    for (const payment of ledger?.payments ?? []) {
+      counts[payment.current_status] += 1;
+    }
+    return counts;
+  }, [ledger?.payments]);
+
   return (
     <section className="card">
       <header className="card__header">
@@ -151,6 +214,7 @@ export function LocalFolderDemoControls() {
               const scan = await api.scanDemoFlowCcd();
               setLastScan(scan);
               setFlowState(await api.getDemoFlowState());
+              await refreshPayments();
             })
           }
         >
@@ -165,6 +229,7 @@ export function LocalFolderDemoControls() {
               const scan = await api.checkDemoFlowSettlement();
               setLastScan(scan);
               setFlowState(await api.getDemoFlowState());
+              await refreshPayments();
             })
           }
         >
@@ -179,6 +244,7 @@ export function LocalFolderDemoControls() {
               const scan = await api.checkDemoFlowReturns();
               setLastScan(scan);
               setFlowState(await api.getDemoFlowState());
+              await refreshPayments();
             })
           }
         >
@@ -278,6 +344,88 @@ export function LocalFolderDemoControls() {
           </div>
         </div>
       )}
+
+      <div className="local-flow__section">
+        <div className="local-flow__ledger-header">
+          <h3 className="local-flow__section-title">Live Payment Ledger</h3>
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={isBusy}
+            onClick={() =>
+              void runAction("Live ledger refreshed", async () => {
+                await refreshPayments();
+              })
+            }
+          >
+            Refresh payments
+          </button>
+        </div>
+        <p className="local-flow__section-subtitle">
+          Live backend ledger from parsed CCD and file evidence. Settlement
+          summary is not payment-level clearing evidence; no payment is marked
+          cleared.
+        </p>
+
+        <div className="local-flow__ledger-counts">
+          {LEDGER_STATUS_ORDER.map((status) => (
+            <div key={status} className="local-flow__ledger-count">
+              <StatusBadge status={status} size="sm" />
+              <span className="local-flow__ledger-count-value">
+                {ledgerCounts[status]}
+              </span>
+            </div>
+          ))}
+          {ledger && (
+            <div className="local-flow__ledger-asof">
+              As of {formatTimestamp(ledger.as_of)}
+            </div>
+          )}
+        </div>
+
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Payment ID</th>
+                <th>Trace number</th>
+                <th>Individual name</th>
+                <th>Individual ID</th>
+                <th className="table__num">Amount</th>
+                <th>Current status</th>
+                <th>Latest evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ledgerPayments.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="table__empty">
+                    No live ledger payments yet. Seed CCD files, then click
+                    Scan CCD.
+                  </td>
+                </tr>
+              )}
+              {ledgerPayments.map((payment) => (
+                <tr key={payment.payment_id}>
+                  <td className="table__mono">{payment.payment_id}</td>
+                  <td className="table__mono">{payment.trace_number}</td>
+                  <td>{payment.individual_name}</td>
+                  <td className="table__mono">{payment.individual_id_number}</td>
+                  <td className="table__num">
+                    {formatDollars(payment.amount_cents)}
+                  </td>
+                  <td>
+                    <StatusBadge status={payment.current_status} size="sm" />
+                  </td>
+                  <td className="local-flow__ledger-evidence">
+                    {latestEvidenceSummary(payment)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="local-flow__section">
         <h3 className="local-flow__section-title">Batch state</h3>
