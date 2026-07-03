@@ -10,11 +10,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, status
 
+from payment_tracking_agent.ledger.store import PaymentLedger, get_payment_ledger
 from payment_tracking_agent.models.demo_flow import (
     DemoFlowConfigView,
     DemoFlowState,
     ScanResult,
 )
+from payment_tracking_agent.models.ledger import PaymentLedgerView
 from payment_tracking_agent.simulator.folder_watcher import (
     FolderWatcher,
     get_folder_watcher,
@@ -64,6 +66,20 @@ def get_state(store: ScenarioStateStore = Depends(get_scenario_state)) -> DemoFl
     )
 
 
+@router.get("/payments", response_model=PaymentLedgerView)
+def get_payments(
+    ledger: PaymentLedger = Depends(get_payment_ledger),
+) -> PaymentLedgerView:
+    return PaymentLedgerView(
+        as_of=datetime.now(timezone.utc),
+        payments=ledger.list_payments(),
+    )
+
+
 @router.post("/reset", status_code=status.HTTP_204_NO_CONTENT)
-def reset(store: ScenarioStateStore = Depends(get_scenario_state)) -> None:
+def reset(
+    store: ScenarioStateStore = Depends(get_scenario_state),
+    ledger: PaymentLedger = Depends(get_payment_ledger),
+) -> None:
     store.reset()
+    ledger.reset()

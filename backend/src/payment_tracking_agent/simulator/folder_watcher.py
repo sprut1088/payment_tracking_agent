@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from payment_tracking_agent.config import Settings, settings as default_settings
+from payment_tracking_agent.ledger.store import PaymentLedger, get_payment_ledger
 from payment_tracking_agent.models.demo_flow import (
     BatchIntake,
     BatchIntakeStatus,
@@ -27,6 +28,18 @@ from payment_tracking_agent.models.demo_flow import (
     DetectedFile,
     FileKind,
     ScanResult,
+)
+from payment_tracking_agent.models.ledger import (
+    Payment,
+    PaymentEvidence,
+    PaymentStatus,
+    PaymentStatusEvent,
+)
+from payment_tracking_agent.parsers.ccd import (
+    ParsedCcdEntry,
+    ParsedCcdFile,
+    mask_account_number,
+    parse_ccd_file,
 )
 from payment_tracking_agent.simulator.scenario_state import (
     ScenarioStateStore,
@@ -41,9 +54,11 @@ class FolderWatcher:
         self,
         settings: Settings | None = None,
         store: ScenarioStateStore | None = None,
+        ledger: PaymentLedger | None = None,
     ) -> None:
         self._settings = settings or default_settings
         self._store = store or get_scenario_state()
+        self._ledger = ledger or get_payment_ledger()
 
     @property
     def config_view(self) -> DemoFlowConfigView:
@@ -82,6 +97,7 @@ class FolderWatcher:
         for file in self._list_new_files(cfg.inbox_dir, FileKind.CCD, now):
             batch = self._new_batch_from_ccd(file, now)
             self._store.register_batch(batch)
+            self._create_payments_from_ccd(batch.batch_id, file, now)
             result.new_files.append(file)
             result.new_batches.append(batch.batch_id)
 
@@ -182,6 +198,63 @@ class FolderWatcher:
             expected_returns_scan_at=now
             + timedelta(seconds=self._settings.returns_delay_seconds),
             status=BatchIntakeStatus.AWAITING_SETTLEMENT,
+        )
+
+    def _create_payments_from_ccd(
+        self, batch_key: str, file: DetectedFile, now: datetime
+    ) -> list[Payment]:
+        parsed: ParsedCcdFile = parse_ccd_file(file.path)
+        if not parsed.entries:
+            return []
+
+        status = (
+            PaymentStatus.SENT_TO_SCHEME
+            if parsed.syntax_valid
+            else PaymentStatus.WITH_BANK
+        )
+        summary = (
+            "CCD file uploaded and bank-side syntax validation passed."
+            if parsed.syntax_valid
+            else "CCD file uploaded but bank-side syntax validation failed; payment held with bank."
+        )
+        source = "CCD upload scan"
+
+        payments: list[Payment] = []
+        for index, entry in enumerate(parsed.entries, start=1):
+            payments.append(self._build_payment(batch_key, file, entry, index, status, source, summary, now))
+        return self._ledger.add_payments(payments)
+
+    @staticmethod
+    def _build_payment(
+        batch_key: str,
+        file: DetectedFile,
+        entry: ParsedCcdEntry,
+        sequence: int,
+        status: PaymentStatus,
+        evidence_source: str,
+        evidence_summary: str,
+        now: datetime,
+    ) -> Payment:
+        evidence = PaymentEvidence(
+            source=evidence_source, summary=evidence_summary, recorded_at=now
+        )
+        payment_id = f"{batch_key}:{sequence:04d}"
+        return Payment(
+            payment_id=payment_id,
+            batch_key=batch_key,
+            source_file=file.filename,
+            trace_number=entry.trace_number,
+            transaction_code=entry.transaction_code,
+            receiving_dfi_identification=entry.receiving_dfi_identification,
+            masked_account_number=mask_account_number(entry.dfi_account_number),
+            amount_cents=entry.amount_cents,
+            individual_id_number=entry.individual_id_number,
+            individual_name=entry.individual_name,
+            current_status=status,
+            status_history=[
+                PaymentStatusEvent(status=status, at=now, evidence=evidence),
+            ],
+            evidence=[evidence],
         )
 
     def _attach_to_batch(self, file: DetectedFile) -> bool:
