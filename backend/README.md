@@ -201,6 +201,23 @@ src/payment_tracking_agent/
 ```
 
 
+## Seed Sample Local Demo Files
+
+Use the helper script from repo root to copy predefined sample artifacts into
+`backend/demo-inbox` for phased local-folder scanning.
+
+```powershell
+.\scripts\seed-local-demo-files.ps1 -Phase clean
+.\scripts\seed-local-demo-files.ps1 -Phase ccd
+.\scripts\seed-local-demo-files.ps1 -Phase settlement
+.\scripts\seed-local-demo-files.ps1 -Phase returns
+```
+
+`-Phase reset` remains supported as an alias for `-Phase clean`.
+
+This step seeds placeholder files only. ACH parsing is intentionally out of
+scope here.
+
 ## Test
 
 ```powershell

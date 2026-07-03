@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from payment_tracking_agent import __version__
+from payment_tracking_agent.api.demo_flow import router as demo_flow_router
 from payment_tracking_agent.api.routes import router as api_router
 from payment_tracking_agent.config import settings
 
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_router)
+    app.include_router(demo_flow_router)
     return app
 
 
