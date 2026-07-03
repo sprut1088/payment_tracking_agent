@@ -157,11 +157,21 @@ export interface CustomerSummary {
   rejectedByBeneficiaryBank: number;
   lastRejectionDate?: string;
   historicalRejectionCount: number;
+  riskLevel?: string;
+  riskReason?: string | null;
 }
 
 export interface DashboardResponse<T> {
   rows: T[];
   generatedAt: string;
+}
+
+export interface UploadSummary {
+  upload_id: string;
+  file_name: string;
+  uploaded_at: string;
+  entry_count: number;
+  batch_count: number;
 }
 
 export type DemoFlowFileKind = "ccd" | "settlement" | "scheme_reject" | "return";
@@ -204,6 +214,22 @@ export interface DemoFlowScanResult {
   new_files: DemoFlowDetectedFile[];
   new_batches: string[];
   batches_advanced: string[];
+  /** Only populated by the scan-ccd endpoint. */
+  uploads?: ScanCcdUploadOutcome[];
+}
+
+export interface ScanCcdUploadOutcome {
+  file_name: string;
+  batch_id: string;
+  is_valid: boolean;
+  is_awaiting_review: boolean;
+  upload_id?: string;
+  entry_count: number;
+  batch_count: number;
+  errors: string[];
+  validation_error_count: number;
+  corrected_file_content?: string | null;
+  corrected_lines?: Array<{ line_number: number; line: string; was_corrected: boolean }> | null;
 }
 
 export interface DemoFlowState {
@@ -219,7 +245,72 @@ export interface DemoFlowConfig {
   scheme_reject_dir: string;
   returns_dir: string;
   processed_dir: string;
+  under_review_dir: string;
   settlement_delay_seconds: number;
   returns_delay_seconds: number;
   poll_interval_seconds: number;
+}
+
+// ---------------------------------------------------------------------------
+// Drop folder status (GET /api/v1/drop-status)
+// ---------------------------------------------------------------------------
+
+export interface DropFileInfo {
+  filename: string;
+  /** e.g. "ccd/input", "settlement/processed", "returns/error" */
+  subfolder: string;
+  size_bytes: number;
+  modified_at: string;
+}
+
+export interface DropStatusResponse {
+  files: DropFileInfo[];
+  scanned_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Under-review / correction-review types
+// ---------------------------------------------------------------------------
+
+export interface CorrectedLineItem {
+  line_number: number;
+  line: string;
+  was_corrected: boolean;
+  explanation?: string | null;
+}
+
+export interface UnderReviewItem {
+  file_name: string;
+  batch_id: string;
+  discovered_at: string;
+  errors: string[];
+  original_content: string;
+  corrected_file_content: string | null;
+  corrected_lines: CorrectedLineItem[] | null;
+}
+
+// ---------------------------------------------------------------------------
+// Backend live API response shapes (GET /api/v1/payments)
+// ---------------------------------------------------------------------------
+
+export interface BackendPaymentListItem {
+  upload_id: string;
+  file_name: string;
+  uploaded_at: string;
+  trace_number: string;
+  batch_number: string;
+  individual_name: string;
+  individual_id_number: string;
+  amount: number;
+  amount_cents: number;
+  receiving_dfi: string;
+  dfi_account_number_masked: string;
+  status: string;
+  business_status: string;
+  corrective_action: string | null;
+  return_reason_code: string | null;
+  return_reason_description: string | null;
+  return_customer_message: string | null;
+  risk_level: string;
+  risk_reason: string | null;
 }

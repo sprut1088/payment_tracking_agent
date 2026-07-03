@@ -110,6 +110,12 @@ def process_ccd_upload(file_name: str, content: bytes) -> UploadCCDResponse:
     )
     store.save_upload(record)
 
+    store.append_event(
+        "BeforePaymentSubmissionAgent",
+        f"CCD uploaded \u2014 {file_name}: {parsed.entry_count} payment(s) parsed across "
+        f"{len(parsed.batches)} batch(es). Status: WITH BANK.",
+    )
+
     return UploadCCDResponse(
         is_valid=True,
         file_name=file_name,
@@ -155,21 +161,25 @@ def _build_invalid_response(
     # exactly 94 chars.  Otherwise fall back to the deterministic reconstructor
     # which guarantees the correct length.
     suggestion_map: dict[int, str] = {}
+    explanation_map: dict[int, str] = {}
     final_suggestions: list[dict] = []
     for ln, raw_line, _ in errored_lines:
         llm_entry = llm_by_line.get(ln)
         if llm_entry and len(llm_entry["corrected_line"]) == 94:
             suggestion_map[ln] = llm_entry["corrected_line"]
+            explanation_map[ln] = llm_entry.get("explanation", "")
             final_suggestions.append(llm_entry)
         else:
             reconstructed = nacha_reconstructor.reconstruct_record(raw_line)
             suggestion_map[ln] = reconstructed
             note = " [length corrected deterministically]" if llm_entry else " [reconstructed deterministically — LLM unavailable or failed]"
+            expl = (llm_entry["explanation"] + note) if llm_entry else note.strip()
+            explanation_map[ln] = expl
             final_suggestions.append({
                 "line_number": ln,
                 "original_line": raw_line,
                 "corrected_line": reconstructed,
-                "explanation": (llm_entry["explanation"] + note) if llm_entry else note.strip(),
+                "explanation": expl,
             })
 
     # Only build corrected_lines when the LLM actually provided fixes.
@@ -181,6 +191,7 @@ def _build_invalid_response(
                 line_number=i + 1,
                 line=suggestion_map.get(i + 1, line),
                 was_corrected=(i + 1) in suggestion_map,
+                explanation=explanation_map.get(i + 1) if (i + 1) in suggestion_map else None,
             )
             for i, line in enumerate(original_lines)
         ]

@@ -1,0 +1,175 @@
+{
+  "errors": [
+    "Line 1 [record_length]: Expected 94 characters, got 89",
+    "Line 2 [record_length]: Expected 94 characters, got 97",
+    "Line 3 [record_length]: Expected 94 characters, got 81",
+    "Line 4 [record_length]: Expected 94 characters, got 81",
+    "Line 5 [record_length]: Expected 94 characters, got 81",
+    "Line 6 [record_length]: Expected 94 characters, got 81",
+    "Line 7 [record_length]: Expected 94 characters, got 81",
+    "Line 8 [record_length]: Expected 94 characters, got 81",
+    "Line 9 [record_length]: Expected 94 characters, got 81",
+    "Line 10 [record_length]: Expected 94 characters, got 81",
+    "Line 11 [record_length]: Expected 94 characters, got 81",
+    "Line 12 [record_length]: Expected 94 characters, got 81",
+    "Line 13 [record_length]: Expected 94 characters, got 81",
+    "Line 14 [record_length]: Expected 94 characters, got 81",
+    "Line 15 [record_length]: Expected 94 characters, got 81",
+    "Line 16 [record_length]: Expected 94 characters, got 81",
+    "Line 17 [record_length]: Expected 94 characters, got 81",
+    "Line 18 [record_length]: Expected 94 characters, got 81",
+    "Line 19 [record_length]: Expected 94 characters, got 81",
+    "Line 20 [record_length]: Expected 94 characters, got 81",
+    "Line 21 [record_length]: Expected 94 characters, got 81",
+    "Line 22 [record_length]: Expected 94 characters, got 81",
+    "Line 23 [record_length]: Expected 94 characters, got 84",
+    "Line 24 [record_length]: Expected 94 characters, got 80"
+  ],
+  "corrected_file_content": "101 123456789 9876543212607021700A094101ODFI BANK              COMPANY BANK                   \r\n5200TEST COMPANY                        1234567890CCDPAYMENTS   260702260702   112345678000000\r\n6220210000211000000000000001 0000010000               VENDOR 01             000123456780000001\r\n6220210000211000000000000002 0000012500               VENDOR 02             000123456780000002\r\n6220210000211000000000000003 0000015000               VENDOR 03             000123456780000003\r\n6220210000211000000000000004 0000017500               VENDOR 04             000123456780000004\r\n6220210000211000000000000005 0000020000               VENDOR 05             000123456780000005\r\n6220210000211000000000000006 0000022500               VENDOR 06             000123456780000006\r\n6220210000211000000000000007 0000025000               VENDOR 07             000123456780000007\r\n6220210000211000000000000008 0000027500               VENDOR 08             000123456780000008\r\n6220210000211000000000000009 0000030000               VENDOR 09             000123456780000009\r\n6220210000211000000000000010 0000032500               VENDOR 10             000123456780000010\r\n6220210000211000000000000011 0000035000               VENDOR 11             000123456780000011\r\n6220210000211000000000000012 0000037500               VENDOR 12             000123456780000012\r\n6220210000211000000000000013 0000040000               VENDOR 13             000123456780000013\r\n6220210000211000000000000014 0000042500               VENDOR 14             000123456780000014\r\n6220210000211000000000000015 0000045000               VENDOR 15             000123456780000015\r\n6220210000211000000000000016 0000047500               VENDOR 16             000123456780000016\r\n6220210000211000000000000017 0000050000               VENDOR 17             000123456780000017\r\n6220210000211000000000000018 0000052500               VENDOR 18             000123456780000018\r\n6220210000211000000000000019 0000055000               VENDOR 19             000123456780000019\r\n6220210000211000000000000020 0000057500               VENDOR 20             000123456780000020\r\n820000002000420000750000000675001234567890                         123456780000001     0000001\r\n9000001000001000000200004200007500000000000000000067500                                       \r\n",
+  "corrected_lines": [
+    {
+      "line_number": 1,
+      "line": "101 123456789 9876543212607021700A094101ODFI BANK              COMPANY BANK                   ",
+      "was_corrected": true,
+      "explanation": "File Header: Added missing time field (1700), spaced File ID Modifier 'A', and added 8-char reference code (spaces) to reach 94 chars [length corrected deterministically]"
+    },
+    {
+      "line_number": 2,
+      "line": "5200TEST COMPANY                        1234567890CCDPAYMENTS   260702260702   112345678000000",
+      "was_corrected": true,
+      "explanation": "Batch Header: Removed extra spaces at end to exactly 94 chars (batch number must be 7 digits at position 87-94) [length corrected deterministically]"
+    },
+    {
+      "line_number": 3,
+      "line": "6220210000211000000000000001 0000010000               VENDOR 01             000123456780000001",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 4,
+      "line": "6220210000211000000000000002 0000012500               VENDOR 02             000123456780000002",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 5,
+      "line": "6220210000211000000000000003 0000015000               VENDOR 03             000123456780000003",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 6,
+      "line": "6220210000211000000000000004 0000017500               VENDOR 04             000123456780000004",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 7,
+      "line": "6220210000211000000000000005 0000020000               VENDOR 05             000123456780000005",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 8,
+      "line": "6220210000211000000000000006 0000022500               VENDOR 06             000123456780000006",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 9,
+      "line": "6220210000211000000000000007 0000025000               VENDOR 07             000123456780000007",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 10,
+      "line": "6220210000211000000000000008 0000027500               VENDOR 08             000123456780000008",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 11,
+      "line": "6220210000211000000000000009 0000030000               VENDOR 09             000123456780000009",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 12,
+      "line": "6220210000211000000000000010 0000032500               VENDOR 10             000123456780000010",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 13,
+      "line": "6220210000211000000000000011 0000035000               VENDOR 11             000123456780000011",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 14,
+      "line": "6220210000211000000000000012 0000037500               VENDOR 12             000123456780000012",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 15,
+      "line": "6220210000211000000000000013 0000040000               VENDOR 13             000123456780000013",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 16,
+      "line": "6220210000211000000000000014 0000042500               VENDOR 14             000123456780000014",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 17,
+      "line": "6220210000211000000000000015 0000045000               VENDOR 15             000123456780000015",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 18,
+      "line": "6220210000211000000000000016 0000047500               VENDOR 16             000123456780000016",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 19,
+      "line": "6220210000211000000000000017 0000050000               VENDOR 17             000123456780000017",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 20,
+      "line": "6220210000211000000000000018 0000052500               VENDOR 18             000123456780000018",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 21,
+      "line": "6220210000211000000000000019 0000055000               VENDOR 19             000123456780000019",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 22,
+      "line": "6220210000211000000000000020 0000057500               VENDOR 20             000123456780000020",
+      "was_corrected": true,
+      "explanation": "Entry Detail: Left-justified account number in 17-char field [12:29], properly positioned amount, individual ID, name, addenda indicator '0', and 17-char trace number [length corrected deterministically]"
+    },
+    {
+      "line_number": 23,
+      "line": "820000002000420000750000000675001234567890                         123456780000001     0000001",
+      "was_corrected": true,
+      "explanation": "Batch Control: Positioned entry count (000020), hash (0004200007), debit amount (all zeros), credit amount, company ID, MAC (spaces), reserved (spaces), ODFI, and batch number to exactly 94 chars [length corrected deterministically]"
+    },
+    {
+      "line_number": 24,
+      "line": "9000001000001000000200004200007500000000000000000067500                                       ",
+      "was_corrected": true,
+      "explanation": "File Control: Positioned batch count, block count, entry count, hash, debit total (zeros), credit total, and reserved (39 spaces) to exactly 94 chars"
+    }
+  ]
+}

@@ -14,14 +14,18 @@ from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 
 from payment_tracking_agent import __version__
 from payment_tracking_agent.ledger import store
+from payment_tracking_agent.models.payment import PaymentStatus
 from payment_tracking_agent.models.transaction_status import (
+    CustomerSummaryItem,
     FileTransactionsResponse,
     PaymentListItem,
     TransactionStatus,
 )
+from payment_tracking_agent.risk.engine import compute_customer_risk
 from payment_tracking_agent.services import return_file_service, settlement_service, upload_service
 from payment_tracking_agent.services.upload_service import UploadValidationError
 
@@ -31,6 +35,15 @@ router = APIRouter()
 @router.get("/health", tags=["health"])
 def health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+@router.get("/api/v1/events", tags=["Events"])
+def list_events(limit: int = 100) -> list[dict]:
+    """Return recent system events from the payment ledger, newest first.
+
+    Each event has: ``timestamp``, ``cycleTime``, ``agent``, ``message``.
+    """
+    return store.list_events(limit=min(limit, 200))
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +202,18 @@ def list_payments(
     results: list[PaymentListItem] = []
     uploads = [store.get_upload(upload_id)] if upload_id else store.list_uploads()
 
+    # Fetch timestamped history once; the risk engine filters per customer internally.
+    # Cache risk per customer so the LLM (if enabled) is called once per customer,
+    # not once per payment row.
+    history = store.list_all_entries_with_timestamps()
+    risk_cache: dict[str, tuple[str, str | None]] = {}
+
+    def _get_risk(cid: str) -> tuple[str, str | None]:
+        if cid not in risk_cache:
+            lvl, reason = compute_customer_risk(cid, history)
+            risk_cache[cid] = (lvl, reason)
+        return risk_cache[cid]
+
     for record in uploads:
         if record is None:
             continue
@@ -198,6 +223,9 @@ def list_payments(
                     continue
                 if business_status and entry.business_status != business_status:
                     continue
+                risk_level, risk_reason = _get_risk(
+                    entry.individual_id_number or entry.trace_number
+                )
                 results.append(
                     PaymentListItem(
                         upload_id=record.upload_id,
@@ -214,8 +242,78 @@ def list_payments(
                         status=entry.status.value,
                         business_status=entry.business_status,
                         corrective_action=entry.corrective_action,
+                        return_reason_code=entry.return_reason_code,
+                        return_reason_description=entry.return_reason_description,
+                        return_customer_message=entry.return_customer_message,
+                        risk_level=risk_level,
+                        risk_reason=risk_reason,
                     )
                 )
+    return results
+
+
+@router.get(
+    "/api/v1/customers",
+    response_model=list[CustomerSummaryItem],
+    tags=["Transactions"],
+)
+def list_customers() -> list[CustomerSummaryItem]:
+    """Return one aggregated row per unique customer (individual_id_number).
+
+    Counts are grouped from the full payment ledger.  Risk level is computed
+    once per customer using the time-aware risk engine.
+    """
+    # Build per-customer payment buckets
+    by_customer: dict[str, list] = {}
+    for record in store.list_uploads():
+        for batch in record.parsed.batches:
+            for entry in batch.entries:
+                cid = entry.individual_id_number or entry.trace_number
+                by_customer.setdefault(cid, []).append(entry)
+
+    if not by_customer:
+        return []
+
+    history = store.list_all_entries_with_timestamps()
+    risk_cache: dict[str, tuple[str, str | None]] = {}
+
+    def _get_risk(cid: str) -> tuple[str, str | None]:
+        if cid not in risk_cache:
+            risk_cache[cid] = compute_customer_risk(cid, history)
+        return risk_cache[cid]
+
+    _SCHEME_STATUSES = (
+        PaymentStatus.WITH_SCHEME_SUBMITTED,
+        PaymentStatus.WITH_SCHEME_ACKNOWLEDGED,
+    )
+    _BENEFICIARY_STATUSES = (PaymentStatus.WITH_BENEFICIARY_BANK_PENDING,)
+    _REJECTED_SCHEME = (PaymentStatus.REJECTED_BY_SETTLEMENT,)
+    _REJECTED_RETURN = (PaymentStatus.REJECTED_BY_RETURN_FILE,)
+
+    results: list[CustomerSummaryItem] = []
+    for cid, entries in by_customer.items():
+        risk_level, risk_reason = _get_risk(cid)
+        results.append(
+            CustomerSummaryItem(
+                customer_id=cid,
+                customer_name=entries[0].individual_name or "Unknown",
+                total_payments=len(entries),
+                sent_to_scheme=sum(1 for e in entries if e.status in _SCHEME_STATUSES),
+                with_beneficiary_bank=sum(1 for e in entries if e.status in _BENEFICIARY_STATUSES),
+                rejected_by_scheme=sum(1 for e in entries if e.status in _REJECTED_SCHEME),
+                rejected_by_beneficiary_bank=sum(1 for e in entries if e.status in _REJECTED_RETURN),
+                last_rejection_date=None,  # no per-entry timestamp available
+                historical_rejection_count=sum(
+                    1 for e in entries
+                    if e.status in (*_REJECTED_SCHEME, *_REJECTED_RETURN)
+                ),
+                risk_level=risk_level,
+                risk_reason=risk_reason,
+            )
+        )
+    # Sort: highest risk first, then most rejections
+    _risk_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    results.sort(key=lambda r: (_risk_order.get(r.risk_level, 9), -r.historical_rejection_count))
     return results
 
 
@@ -248,6 +346,9 @@ def get_payment(trace_number: str) -> TransactionStatus:
         status=entry.status.value,
         business_status=entry.business_status,
         corrective_action=entry.corrective_action,
+        return_reason_code=entry.return_reason_code,
+        return_reason_description=entry.return_reason_description,
+        return_customer_message=entry.return_customer_message,
     )
 
 
@@ -376,3 +477,45 @@ def get_settlement_file(settlement_file_id: str) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="Settlement file not found.")
     return record.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# Drop folder status
+# ---------------------------------------------------------------------------
+
+class DropFileInfo(BaseModel):
+    filename: str
+    subfolder: str   # e.g. "ccd/input", "settlement/processed"
+    size_bytes: int
+    modified_at: str  # ISO-8601
+
+
+class DropStatusResponse(BaseModel):
+    files: list[DropFileInfo]
+    scanned_at: str  # ISO-8601
+
+
+@router.get("/api/v1/drop-status", tags=["Drop Folders"])
+def get_drop_status() -> DropStatusResponse:
+    """Return files processed by the scheduler from any drop/ input folder.
+
+    Data comes from the in-memory processing log recorded by the scheduler jobs
+    at the time each file is moved to processed/, error/, or under-review/.
+    No filesystem scan is performed.
+    """
+    from datetime import datetime, timezone
+
+    files = [
+        DropFileInfo(
+            filename=entry["filename"],
+            subfolder=f"{entry['file_type']}/{entry['outcome']}",
+            size_bytes=entry["size_bytes"],
+            modified_at=entry["processed_at"],
+        )
+        for entry in store.list_drop_files()
+    ]
+
+    return DropStatusResponse(
+        files=files,
+        scanned_at=datetime.now(tz=timezone.utc).isoformat(),
+    )

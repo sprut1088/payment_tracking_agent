@@ -1,27 +1,80 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { PaymentDetailDrawer } from "../components/PaymentDetailDrawer";
 import { StatusBadge } from "../components/StatusBadge";
-import type { PaymentRecord } from "../types/api";
+import type { BusinessStatus, PaymentRecord } from "../types/api";
 
-export function PaymentSearchPage() {
+interface PaymentSearchPageProps {
+  demoMode: boolean;
+  isActive?: boolean;
+}
+
+const STATUS_FILTERS: { label: string; value: BusinessStatus | null }[] = [
+  { label: "All",                         value: null },
+  { label: "With Bank",                   value: "WITH BANK" },
+  { label: "Sent to Scheme",              value: "SENT TO SCHEME" },
+  { label: "With Beneficiary Bank",       value: "WITH BENEFICIARY BANK" },
+  { label: "Rejected by Scheme",          value: "REJECTED BY SCHEME" },
+  { label: "Rejected by Beneficiary Bank",value: "REJECTED BY BENEFICIARY BANK" },
+];
+
+export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps) {
   const [query, setQuery] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<BusinessStatus | null>(null);
+  const [batchFilter, setBatchFilter] = useState<string>("all");
   const [results, setResults] = useState<PaymentRecord[]>([]);
   const [selected, setSelected] = useState<PaymentRecord | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Re-fetch silently when the page becomes visible again after keep-alive navigation.
+  const mountedOnce = useRef(false);
+  const prevActive = useRef(false);
+  useEffect(() => {
+    if (!mountedOnce.current) {
+      mountedOnce.current = true;
+      prevActive.current = isActive === true;
+      return;
+    }
+    if (isActive && !prevActive.current) {
+      setRefreshKey((k) => k + 1);
+    }
+    prevActive.current = isActive === true;
+  }, [isActive]);
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    api.searchPayments(query).then((r) => {
-      if (!mounted) return;
-      setResults(r);
-      setLoading(false);
-    });
+    setError(null);
+    const call = demoMode
+      ? api.searchPayments(query)
+      : api.searchPaymentsLive(query);
+    call
+      .then((r) => {
+        if (!mounted) return;
+        setResults(r);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : "Failed to load payments from backend.");
+        setLoading(false);
+      });
     return () => {
       mounted = false;
     };
-  }, [query]);
+  // refreshKey is intentionally included so revisiting the page triggers a re-fetch.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, demoMode, refreshKey]);
+
+  const distinctBatchIds = Array.from(new Set(results.map((p) => p.batchId))).sort();
+
+  const filtered = results.filter((p) => {
+    if (statusFilter && p.currentStatus !== statusFilter) return false;
+    if (batchFilter !== "all" && p.batchId !== batchFilter) return false;
+    return true;
+  });
 
   return (
     <div className="page">
@@ -30,13 +83,14 @@ export function PaymentSearchPage() {
           <div className="page__eyebrow">Find</div>
           <h1 className="page__title">Payment Search</h1>
           <p className="page__subtitle">
-            Find a single payment by trace number, payment ID, customer, or
-            beneficiary. Every match includes an evidence-backed status
-            timeline. Demo Mode ON uses scripted SME-aligned mock records.
+            {demoMode
+              ? "Demo Mode ON — find payments from the scripted SME-aligned mock records."
+              : "Live Folder Mode — no mock data is shown. Upload a CCD file via the Demo Simulator to populate this view."}
           </p>
         </div>
       </header>
 
+      {/* Search box is always visible regardless of demoMode */}
       <section className="card">
         <label className="field">
           <span className="field__label">Search</span>
@@ -48,9 +102,46 @@ export function PaymentSearchPage() {
             autoFocus
           />
         </label>
-        <div className="filter-row__count">
-          {loading ? "Searching…" : `${results.length} result${results.length === 1 ? "" : "s"}`}
+
+        <div className="filter-chips">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.label}
+              type="button"
+              className={`filter-chip${statusFilter === f.value ? " filter-chip--active" : ""}`}
+              onClick={() => setStatusFilter(f.value)}
+            >
+              {f.label}
+              {f.value !== null && (
+                <span className="filter-chip__count">
+                  {results.filter((p) => p.currentStatus === f.value).length}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
+
+        <div className="filter-row filter-row--batch">
+          <label className="filter-row__label" htmlFor="batch-filter">Batch</label>
+          <select
+            id="batch-filter"
+            className="field__control filter-row__select"
+            value={batchFilter}
+            onChange={(e) => setBatchFilter(e.target.value)}
+          >
+            <option value="all">All batches ({results.length} payment{results.length === 1 ? "" : "s"})</option>
+            {distinctBatchIds.map((bid) => (
+              <option key={bid} value={bid}>
+                {bid} — {results.filter((p) => p.batchId === bid).length} payment{results.filter((p) => p.batchId === bid).length === 1 ? "" : "s"}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="filter-row__count">
+          {loading ? "Searching…" : `${filtered.length} result${filtered.length === 1 ? "" : "s"}`}
+        </div>
+        {error && <div className="card__error">Backend error: {error}</div>}
       </section>
 
       <section className="card">
@@ -68,7 +159,7 @@ export function PaymentSearchPage() {
               </tr>
             </thead>
             <tbody>
-              {results.map((p) => (
+              {filtered.map((p) => (
                 <tr key={p.paymentId}>
                   <td>
                     <div className="table__mono">{p.traceNumber}</div>
@@ -98,7 +189,7 @@ export function PaymentSearchPage() {
                   </td>
                 </tr>
               ))}
-              {!loading && results.length === 0 && (
+              {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={7} className="table__empty">
                     No payments match your search.

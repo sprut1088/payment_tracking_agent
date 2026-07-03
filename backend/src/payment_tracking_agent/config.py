@@ -7,9 +7,16 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Absolute path to the backend/ directory, regardless of where the server is launched from.
+_BACKEND_ROOT: Path = Path(__file__).resolve().parent.parent.parent
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="PTA_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="PTA_",
+        env_file=str(_BACKEND_ROOT / ".env"),  # absolute path — works regardless of CWD
+        extra="ignore",
+    )
 
     app_name: str = "ACH Payment Tracking Agent"
     environment: str = "local"
@@ -49,7 +56,10 @@ class Settings(BaseSettings):
 
     # Return file directories
     return_dir: str = "uploaded_files/returns"       # where API-uploaded return files are saved
-    return_scan_dir: str = "drop/returns"            # folder polled by the scheduler
+    # Drop folder watched by the scheduler (frontend buttons use demo-inbox/returns)
+    return_scan_dir: str = str(_BACKEND_ROOT / "drop" / "returns" / "input")
+    return_scan_processed_dir: str = str(_BACKEND_ROOT / "drop" / "returns" / "processed")
+    return_scan_error_dir: str = str(_BACKEND_ROOT / "drop" / "returns" / "error")
 
     # Scheme directory (simulates onward submission to the ACH scheme)
     scheme_dir: str = "uploaded_files/scheme"
@@ -57,11 +67,24 @@ class Settings(BaseSettings):
     # Scheduler intervals (seconds)
     return_scan_interval_seconds: int = 30
     scheme_push_interval_seconds: int = 30
+    # How long after scheme push before payments auto-advance to WITH BENEFICIARY BANK.
+    # Set to 0 to disable the auto-simulation (use manual Check Settlement instead).
+    settlement_simulation_interval_seconds: int = 30
 
     # Settlement rejection file directories
     settlement_dir: str = "uploaded_files/settlement"   # where API-uploaded files are saved
-    settlement_scan_dir: str = "drop/settlement"         # folder polled by the scheduler
+    # Drop folder watched by the scheduler (frontend buttons use demo-inbox/settlement)
+    settlement_scan_dir: str = str(_BACKEND_ROOT / "drop" / "settlement" / "input")
+    settlement_scan_processed_dir: str = str(_BACKEND_ROOT / "drop" / "settlement" / "processed")
+    settlement_scan_error_dir: str = str(_BACKEND_ROOT / "drop" / "settlement" / "error")
     settlement_scan_interval_seconds: int = 30
+
+    # CCD drop folder watched by the scheduler (frontend buttons use demo-inbox/ccd)
+    ccd_scan_dir: str = str(_BACKEND_ROOT / "drop" / "ccd" / "input")
+    ccd_scan_processed_dir: str = str(_BACKEND_ROOT / "drop" / "ccd" / "processed")
+    ccd_scan_under_review_dir: str = str(_BACKEND_ROOT / "drop" / "ccd" / "under-review")
+    ccd_scan_error_dir: str = str(_BACKEND_ROOT / "drop" / "ccd" / "error")
+    ccd_scan_interval_seconds: int = 30
 
     # Local-folder demo flow (Prompt 04).
     # Required folder layout under demo_flow_root:
@@ -70,12 +93,13 @@ class Settings(BaseSettings):
     # becomes T0 for the batch. Later scans look for related settlement and
     # scheme-reject files at T0 + settlement_delay_seconds, and NACHA return
     # files at T0 + returns_delay_seconds.
-    demo_flow_root: Path = Path("demo-inbox")
+    demo_flow_root: Path = _BACKEND_ROOT / "demo-inbox"
     inbox_subdir: str = "ccd"
     settlement_subdir: str = "settlement"
     scheme_reject_subdir: str = "scheme-reject"
     returns_subdir: str = "returns"
     processed_subdir: str = "processed"
+    under_review_subdir: str = "under-review"
     settlement_delay_seconds: int = 120
     returns_delay_seconds: int = 240
     poll_interval_seconds: int = 5

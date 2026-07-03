@@ -65,6 +65,11 @@ def push_pending_uploads_to_scheme() -> list[str]:
             new_status=PaymentStatus.WITH_SCHEME_SUBMITTED,
         )
         pushed_ids.append(record.upload_id)
+        store.append_event(
+            "PaymentLifecycleOrchestrator",
+            f"Scheme push \u2014 {record.file_name}: {len(entries)} payment(s) "
+            "advanced to SENT TO SCHEME. File copied to scheme directory.",
+        )
         logger.info(
             "Scheme push complete — upload=%s  dest=%s  payments=%d",
             record.upload_id,

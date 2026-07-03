@@ -457,6 +457,12 @@ button {
   color: #bfdbfe;
 }
 
+.local-flow__notice--review {
+  background: rgba(251, 191, 36, 0.13);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fde68a;
+}
+
 .local-flow__error {
   background: rgba(248, 113, 113, 0.14);
   border: 1px solid rgba(248, 113, 113, 0.35);
@@ -577,8 +583,19 @@ button {
   padding: 0.9rem 1rem;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  text-align: center;
   gap: 0.5rem;
+}
+
+/* Allow long status labels to wrap inside the board — override the global nowrap */
+.status-board__cell .status-badge {
+  white-space: normal;
+  word-break: break-word;
+  text-align: center;
+  justify-content: center;
+  border-radius: 6px;
+  line-height: 1.4;
 }
 
 .status-board__count {
@@ -864,6 +881,78 @@ button {
   font-size: 0.85rem;
 }
 
+/* Status filter chips — Payment Search page */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-1);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.filter-chip:hover {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+.filter-chip--active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.filter-chip--active:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.filter-chip__count {
+  background: rgba(255,255,255,0.25);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-chip:not(.filter-chip--active) .filter-chip__count {
+  background: var(--bg-2);
+  color: var(--text-muted);
+}
+
+/* Batch filter row */
+.filter-row--batch {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.filter-row__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.filter-row__select {
+  max-width: 340px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -905,6 +994,11 @@ button {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
+}
+
+/* thead th has higher specificity than .table__num, so re-assert right-align on numeric headers */
+.table thead th.table__num {
+  text-align: right;
 }
 
 .table__action {
@@ -1158,6 +1252,13 @@ button {
   font-size: 0.78rem;
 }
 
+.drawer__mono {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 .drawer__amount {
   font-family: var(--font-mono);
   font-size: 1.2rem;
@@ -1319,3 +1420,239 @@ button {
   font-size: 0.78rem;
   font-style: italic;
 }
+
+/* ---------------- CCD Review Panel ---------------- */
+
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.review-card {
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: var(--radius-sm);
+  background: rgba(251, 191, 36, 0.06);
+  padding: 0.9rem 1rem;
+}
+
+.review-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.review-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.review-card__filename {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.review-card__counts {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.review-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.review-card__errors {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.review-card__error-item {
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.08);
+  border-radius: 3px;
+  padding: 0.2rem 0.5rem;
+}
+
+/* Generic error message inside cards */
+.card__error {
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+  font-size: 0.84rem;
+}
+
+/* Diff table */
+.review-diff {
+  margin-top: 0.8rem;
+}
+
+.review-diff__note {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+}
+
+.review-diff__legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.review-diff__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-mono);
+  padding: 0.15em 0.5em;
+  border-radius: 3px;
+}
+
+.review-diff__legend-item--removed {
+  background: rgba(248, 113, 113, 0.15);
+  color: #fca5a5;
+}
+
+.review-diff__legend-item--added {
+  background: rgba(52, 211, 153, 0.15);
+  color: #6ee7b7;
+}
+
+.review-diff__legend-hint {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.review-diff__scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.review-diff__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.review-diff__row {
+  line-height: 1.5;
+}
+
+.review-diff__row--context {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.review-diff__row--removed {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+.review-diff__row--added {
+  background: rgba(52, 211, 153, 0.12);
+  color: #6ee7b7;
+  cursor: default;
+}
+
+.review-diff__row--added[title]:hover {
+  background: rgba(52, 211, 153, 0.22);
+}
+
+.review-diff__gutter {
+  width: 1.6rem;
+  text-align: center;
+  padding: 0.18rem 0.3rem;
+  user-select: none;
+  font-weight: 700;
+  border-right: 1px solid var(--line);
+  color: inherit;
+  opacity: 0.8;
+}
+
+.review-diff__ln {
+  width: 3rem;
+  text-align: right;
+  padding: 0.18rem 0.6rem 0.18rem 0.4rem;
+  color: var(--text-muted);
+  user-select: none;
+  border-right: 1px solid var(--line);
+  opacity: 0.6;
+}
+
+.review-diff__code {
+  padding: 0.18rem 0.8rem;
+  white-space: pre;
+}
+
+.review-diff__expl {
+  padding: 0.18rem 0.8rem;
+  font-family: var(--font-sans, sans-serif);
+  font-size: 0.75rem;
+  color: #a7f3d0;
+  font-style: italic;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+/* Badge colours */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18em 0.55em;
+  border-radius: 99px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badge--warning {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+/* Danger button */
+.button--danger {
+  background: rgba(248, 113, 113, 0.85);
+  border-color: transparent;
+  color: white;
+  font-weight: 600;
+}
+
+.button--danger:hover {
+  filter: brightness(1.1);
+}
+
+/* Small button modifier */
+.button--sm {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+/* Awaiting-review stat highlight */
+.local-flow__stat--review .local-flow__stat-value {
+  color: #fde68a;
+}
+

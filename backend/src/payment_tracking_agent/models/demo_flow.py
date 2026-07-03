@@ -89,6 +89,60 @@ class ScanResult(BaseModel):
     batches_advanced: list[str] = Field(default_factory=list)
 
 
+class CcdUploadOutcome(BaseModel):
+    """Result of running the CCD upload pipeline on one file found during scan."""
+
+    file_name: str
+    batch_id: str
+    is_valid: bool
+    upload_id: str | None = None
+    entry_count: int = 0
+    batch_count: int = 0
+    # Non-empty when is_valid=False or a read error occurred.
+    errors: list[str] = Field(default_factory=list)
+
+    # Populated when is_valid=False and corrections are available.
+    # corrected_file_content is the full file text ready to accept and re-process.
+    validation_error_count: int = 0
+    corrected_file_content: str | None = None
+    corrected_lines: list[dict] | None = None   # [{line_number, line, was_corrected}]
+    is_awaiting_review: bool = False
+
+
+class UnderReviewItem(BaseModel):
+    """A CCD file that failed validation and is waiting for user accept/reject."""
+
+    file_name: str
+    batch_id: str
+    discovered_at: str
+    errors: list[str] = Field(default_factory=list)
+    original_content: str
+    corrected_file_content: str | None = None
+    corrected_lines: list[dict] | None = None
+
+
+class RejectCorrectionRequest(BaseModel):
+    """Request body for the reject-correction endpoint."""
+
+    batch_id: str
+    file_name: str
+
+
+class AcceptCorrectionRequest(BaseModel):
+    """Request body for the accept-correction endpoint."""
+
+    batch_id: str
+    file_name: str
+    # Full corrected ACH file content (value of corrected_file_content from scan-ccd).
+    corrected_content: str
+
+
+class ScanCCDResult(ScanResult):
+    """Extended scan-ccd result: scan metadata + per-file upload outcomes."""
+
+    uploads: list[CcdUploadOutcome] = Field(default_factory=list)
+
+
 class DemoFlowState(BaseModel):
     """Aggregated snapshot of demo-flow state."""
 
@@ -106,6 +160,7 @@ class DemoFlowConfigView(BaseModel):
     scheme_reject_dir: Path
     returns_dir: Path
     processed_dir: Path
+    under_review_dir: Path
     settlement_delay_seconds: int
     returns_delay_seconds: int
     poll_interval_seconds: int

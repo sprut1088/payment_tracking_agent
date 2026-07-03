@@ -63,7 +63,18 @@ export function PaymentDetailDrawer({ payment, onClose }: PaymentDetailDrawerPro
           </div>
           <div className="drawer__field">
             <span className="drawer__label">Return code</span>
-            <div>{payment.returnReasonCode ?? "—"}</div>
+            {payment.returnReasonCode ? (
+              <>
+                <div className="drawer__mono">{payment.returnReasonCode}</div>
+                {payment.evidence.find((e) => e.kind === "RETURN") && (
+                  <div className="drawer__sub">
+                    {payment.evidence.find((e) => e.kind === "RETURN")!.summary}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div>—</div>
+            )}
           </div>
         </div>
 

@@ -56,6 +56,7 @@ class FolderWatcher:
             scheme_reject_dir=root / s.scheme_reject_subdir,
             returns_dir=root / s.returns_subdir,
             processed_dir=root / s.processed_subdir,
+            under_review_dir=root / s.under_review_subdir,
             settlement_delay_seconds=s.settlement_delay_seconds,
             returns_delay_seconds=s.returns_delay_seconds,
             poll_interval_seconds=s.poll_interval_seconds,
@@ -69,6 +70,7 @@ class FolderWatcher:
             cfg.scheme_reject_dir,
             cfg.returns_dir,
             cfg.processed_dir,
+            cfg.under_review_dir / "ccd",
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -78,6 +80,7 @@ class FolderWatcher:
         self.ensure_directories()
         cfg = self.config_view
         result = ScanResult(scanned_at=now)
+        print(f"Scanning CCD inbox: {cfg.inbox_dir}")
 
         for file in self._list_new_files(cfg.inbox_dir, FileKind.CCD, now):
             batch = self._new_batch_from_ccd(file, now)

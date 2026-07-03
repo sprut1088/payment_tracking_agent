@@ -108,6 +108,10 @@ class EntryDetailRecord(BaseModel):
     business_status: str = PaymentStatus.WITH_BANK_UPLOADED.business_status
     # LLM-generated corrective action — populated when a settlement rejection is processed
     corrective_action: str | None = None
+    # Return file evidence — populated when a NACHA return is matched to this entry
+    return_reason_code: str | None = None
+    return_reason_description: str | None = None
+    return_customer_message: str | None = None
 
 
 class ParsedBatch(BaseModel):

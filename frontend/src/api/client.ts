@@ -4,17 +4,22 @@
 
 import type {
   AgentTraceStep,
+  BackendPaymentListItem,
   BatchSummary,
   CustomerSummary,
   DemoFlowConfig,
   DemoFlowScanResult,
   DemoFlowState,
   DashboardResponse,
+  DropStatusResponse,
   EvidenceRef,
+  EventLogEntry,
   PaymentRecord,
   Scenario,
   SimulationState,
   StatusHistoryEvent,
+  UnderReviewItem,
+  UploadSummary,
 } from "../types/api";
 
 // ---------------------------------------------------------------------------
@@ -500,6 +505,157 @@ async function requestNoContent(url: string, init?: RequestInit): Promise<void> 
   }
 }
 
+// ---------------------------------------------------------------------------
+// Live backend helpers — used when Demo Mode is OFF
+// ---------------------------------------------------------------------------
+
+/** Map backend business_status string → frontend BusinessStatus. */
+function mapBusinessStatus(
+  businessStatus: string,
+  internalStatus: string,
+): PaymentRecord["currentStatus"] {
+  if (businessStatus === "WITH SCHEME") return "SENT TO SCHEME";
+  if (businessStatus === "REJECTED") {
+    return internalStatus === "REJECTED_BY_RETURN_FILE"
+      ? "REJECTED BY BENEFICIARY BANK"
+      : "REJECTED BY SCHEME";
+  }
+  const known = [
+    "WITH BANK",
+    "SENT TO SCHEME",
+    "WITH BENEFICIARY BANK",
+    "REJECTED BY SCHEME",
+    "REJECTED BY BENEFICIARY BANK",
+  ] as const;
+  const match = known.find((s) => s === businessStatus);
+  return match ?? "WITH BANK";
+}
+
+/** Map backend internal status string → frontend InternalStatus. */
+function mapInternalStatus(status: string): PaymentRecord["internalStatus"] {
+  const known: PaymentRecord["internalStatus"][] = [
+    "WITH_BANK_UPLOADED",
+    "WITH_BANK_VALIDATING",
+    "WITH_BANK_READY_FOR_SCHEME",
+    "WITH_SCHEME_SUBMITTED",
+    "WITH_BENEFICIARY_BANK_PENDING",
+    "REJECTED_BY_SCHEME_FILE",
+    "REJECTED_BY_RETURN_FILE",
+    "REVIEW_REQUIRED",
+  ];
+  const match = known.find((s) => s === status);
+  return match ?? "WITH_BANK_UPLOADED";
+}
+
+/** Convert a backend PaymentListItem into a frontend PaymentRecord. */
+function mapBackendPayment(item: BackendPaymentListItem): PaymentRecord {
+  const currentStatus = mapBusinessStatus(item.business_status, item.status);
+  const uploadedTime = new Date(item.uploaded_at).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return {
+    paymentId: `PAY-${item.trace_number}`,
+    traceNumber: item.trace_number,
+    batchId: item.batch_number,
+    cycleTime: uploadedTime,
+    sourceFile: item.file_name,
+    companyId: "",
+    customerId: item.individual_id_number.trim() || item.trace_number,
+    customerName: item.individual_name.trim() || "Unknown",
+    beneficiaryName: item.individual_name.trim() || "Unknown",
+    receivingDfi: item.receiving_dfi,
+    maskedAccount: item.dfi_account_number_masked,
+    amount: item.amount,
+    currency: "USD",
+    currentStatus,
+    internalStatus: mapInternalStatus(item.status),
+    statusSince: uploadedTime,
+    statusHistory: [],
+    riskLevel: (item.risk_level as PaymentRecord["riskLevel"]) ?? "LOW",
+    riskReason: item.risk_reason ?? undefined,
+    returnReasonCode: item.return_reason_code ?? undefined,
+    evidence: item.return_reason_code
+      ? [
+          {
+            kind: "RETURN" as const,
+            sourceFile: item.file_name,
+            summary: [
+              `Return code ${item.return_reason_code}`,
+              item.return_reason_description,
+              item.return_customer_message,
+            ]
+              .filter(Boolean)
+              .join(" — "),
+          },
+        ]
+      : [],
+    recommendedAction: item.corrective_action ?? undefined,
+    customerFriendlyMessage: item.return_customer_message ?? undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Short-TTL payment list cache — shared across all live-mode page fetches.
+// Prevents redundant backend round-trips when navigating between pages.
+// ---------------------------------------------------------------------------
+const PAYMENTS_CACHE_TTL_MS = 8_000;
+let _paymentsCache: { data: PaymentRecord[]; ts: number } | null = null;
+let _paymentsFlight: Promise<PaymentRecord[]> | null = null;
+
+/** Fetch all payments from the backend and convert to PaymentRecord[].
+ *  Results are cached for PAYMENTS_CACHE_TTL_MS ms; concurrent callers share
+ *  a single in-flight request rather than issuing duplicates.
+ */
+async function fetchLivePayments(): Promise<PaymentRecord[]> {
+  const now = Date.now();
+  if (_paymentsCache && now - _paymentsCache.ts < PAYMENTS_CACHE_TTL_MS) {
+    return _paymentsCache.data;
+  }
+  if (_paymentsFlight) return _paymentsFlight;
+  _paymentsFlight = requestJson<BackendPaymentListItem[]>("/api/v1/payments")
+    .then((items) => {
+      const data = items.map(mapBackendPayment);
+      _paymentsCache = { data, ts: Date.now() };
+      _paymentsFlight = null;
+      return data;
+    })
+    .catch((err) => {
+      _paymentsFlight = null;
+      throw err;
+    });
+  return _paymentsFlight;
+}
+
+/** Invalidate the payment cache (call after uploads or status-changing actions). */
+export function invalidatePaymentsCache(): void {
+  _paymentsCache = null;
+  _paymentsFlight = null;
+}
+
+/** Build BatchSummary[] from a flat list of live PaymentRecords. */
+function buildLiveBatchSummaries(payments: PaymentRecord[]): BatchSummary[] {
+  const byBatch = new Map<string, PaymentRecord[]>();
+  for (const p of payments) {
+    const list = byBatch.get(p.batchId) ?? [];
+    list.push(p);
+    byBatch.set(p.batchId, list);
+  }
+  return Array.from(byBatch.entries()).map(([batchId, rows]) => ({
+    batchId,
+    cycleTime: rows[0].cycleTime,
+    sourceFile: rows[0].sourceFile,
+    paymentCount: rows.length,
+    withBank: rows.filter((r) => r.currentStatus === "WITH BANK").length,
+    sentToScheme: rows.filter((r) => r.currentStatus === "SENT TO SCHEME").length,
+    withBeneficiaryBank: rows.filter((r) => r.currentStatus === "WITH BENEFICIARY BANK").length,
+    rejectedByScheme: rows.filter((r) => r.currentStatus === "REJECTED BY SCHEME").length,
+    rejectedByBeneficiaryBank: rows.filter(
+      (r) => r.currentStatus === "REJECTED BY BENEFICIARY BANK",
+    ).length,
+  }));
+}
+
 export const api = {
   listScenarios(): Promise<Scenario[]> {
     return delay(scenarios);
@@ -582,6 +738,106 @@ export const api = {
 
   resetDemoFlow(): Promise<void> {
     return requestNoContent("/api/demo-flow/reset", { method: "POST" });
+  },
+
+  getUnderReview(): Promise<UnderReviewItem[]> {
+    return requestJson<UnderReviewItem[]>("/api/demo-flow/under-review");
+  },
+
+  acceptCorrection(payload: {
+    batch_id: string;
+    file_name: string;
+    corrected_content: string;
+  }): Promise<unknown> {
+    return requestJson("/api/demo-flow/accept-correction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rejectCorrection(payload: { batch_id: string; file_name: string }): Promise<void> {
+    return requestNoContent("/api/demo-flow/reject-correction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // -------------------------------------------------------------------------
+  // Live backend calls — used when Demo Mode is OFF
+  // -------------------------------------------------------------------------
+
+  async listPaymentsLive(): Promise<PaymentRecord[]> {
+    return fetchLivePayments();
+  },
+
+  listUploadsLive(): Promise<UploadSummary[]> {
+    return requestJson<UploadSummary[]>("/api/v1/uploads");
+  },
+
+  getDropStatus(): Promise<DropStatusResponse> {
+    return requestJson<DropStatusResponse>("/api/v1/drop-status");
+  },
+
+  getEventsLive(): Promise<EventLogEntry[]> {
+    return requestJson<EventLogEntry[]>("/api/v1/events");
+  },
+
+  async getBatchDashboardLive(): Promise<DashboardResponse<BatchSummary>> {
+    const payments = await fetchLivePayments();
+    return {
+      generatedAt: new Date().toISOString(),
+      rows: buildLiveBatchSummaries(payments),
+    };
+  },
+
+  async getCustomerDashboardLive(): Promise<DashboardResponse<CustomerSummary>> {
+    interface BackendCustomerSummary {
+      customer_id: string;
+      customer_name: string;
+      total_payments: number;
+      sent_to_scheme: number;
+      with_beneficiary_bank: number;
+      rejected_by_scheme: number;
+      rejected_by_beneficiary_bank: number;
+      last_rejection_date: string | null;
+      historical_rejection_count: number;
+      risk_level: string;
+      risk_reason: string | null;
+    }
+    const rows = await requestJson<BackendCustomerSummary[]>("/api/v1/customers");
+    return {
+      generatedAt: new Date().toISOString(),
+      rows: rows.map((r) => ({
+        customerId: r.customer_id,
+        customerName: r.customer_name,
+        totalPayments: r.total_payments,
+        sentToScheme: r.sent_to_scheme,
+        withBeneficiaryBank: r.with_beneficiary_bank,
+        rejectedByScheme: r.rejected_by_scheme,
+        rejectedByBeneficiaryBank: r.rejected_by_beneficiary_bank,
+        lastRejectionDate: r.last_rejection_date ?? undefined,
+        historicalRejectionCount: r.historical_rejection_count,
+        riskLevel: r.risk_level,
+        riskReason: r.risk_reason,
+      })),
+    };
+  },
+
+  async searchPaymentsLive(query: string): Promise<PaymentRecord[]> {
+    const payments = await fetchLivePayments();
+    const q = query.trim().toLowerCase();
+    if (!q) return payments;
+    return payments.filter(
+      (p) =>
+        p.paymentId.toLowerCase().includes(q) ||
+        p.traceNumber.toLowerCase().includes(q) ||
+        p.customerName.toLowerCase().includes(q) ||
+        p.customerId.toLowerCase().includes(q) ||
+        p.beneficiaryName.toLowerCase().includes(q) ||
+        p.batchId.toLowerCase().includes(q),
+    );
   },
 };
 

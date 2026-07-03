@@ -32,6 +32,7 @@ class CorrectedLine(BaseModel):
     line_number: int
     line: str
     was_corrected: bool = False
+    explanation: str | None = None  # LLM-generated plain-English description of the change
 
 
 class UploadCCDResponse(BaseModel):

@@ -1,10 +1,30 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BatchDashboard } from "../components/BatchDashboard";
 import { PaymentDetailDrawer } from "../components/PaymentDetailDrawer";
 import type { PaymentRecord } from "../types/api";
 
-export function BatchDashboardPage() {
+interface BatchDashboardPageProps {
+  demoMode: boolean;
+  isActive?: boolean;
+}
+
+export function BatchDashboardPage({ demoMode, isActive }: BatchDashboardPageProps) {
   const [selected, setSelected] = useState<PaymentRecord | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const mountedOnce = useRef(false);
+  const prevActive = useRef(false);
+
+  useEffect(() => {
+    if (!mountedOnce.current) {
+      mountedOnce.current = true;
+      prevActive.current = isActive === true;
+      return;
+    }
+    if (isActive && !prevActive.current) {
+      setRefreshKey((k) => k + 1);
+    }
+    prevActive.current = isActive === true;
+  }, [isActive]);
 
   return (
     <div className="page">
@@ -13,14 +33,15 @@ export function BatchDashboardPage() {
           <div className="page__eyebrow">Operations</div>
           <h1 className="page__title">Batch Dashboard</h1>
           <p className="page__subtitle">
-            Payments grouped by batch and cycle. Click a payment to inspect
-            evidence and its status timeline. In Demo Mode ON, this dashboard
-            uses predefined SME-aligned mock data.
+            {demoMode
+              ? "Demo Mode ON — showing predefined SME-aligned mock data."
+              : "Live Folder Mode — no mock data is shown. Upload a CCD file via the Demo Simulator to populate this view."}
           </p>
         </div>
       </header>
 
-      <BatchDashboard onSelectPayment={setSelected} />
+      {/* BatchDashboard handles its own data source based on demoMode */}
+      <BatchDashboard onSelectPayment={setSelected} demoMode={demoMode} refreshKey={refreshKey} />
       <PaymentDetailDrawer payment={selected} onClose={() => setSelected(null)} />
     </div>
   );

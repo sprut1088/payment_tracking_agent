@@ -140,4 +140,11 @@ def process_settlement_file(file_name: str, content: bytes) -> ProcessedSettleme
         reason_codes_seen=list(seen_codes.keys()),
     )
     store.save_settlement_file(result)
+    if matched_count:
+        store.append_event(
+            "AfterPaymentSubmissionAgent",
+            f"Scheme reject processed \u2014 {file_name}: {matched_count} payment(s) matched "
+            f"and advanced to REJECTED BY SCHEME. "
+            f"{result.unmatched_count} unmatched trace(s).",
+        )
     return result

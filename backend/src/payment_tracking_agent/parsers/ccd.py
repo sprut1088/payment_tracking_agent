@@ -84,8 +84,8 @@ def _parse_entry_detail(
         amount=round(amount_cents / 100.0, 2),
         individual_id_number=line[39:54].strip(),
         individual_name=line[54:76].strip(),
-        addenda_indicator=line[76:77].strip(),   # NACHA pos 77 (0-based index 76)
-        trace_number=line[77:94].strip(),          # NACHA pos 78-94 (17 chars)
+        addenda_indicator=line[78:79].strip(),   # NACHA pos 79 (0-based index 78)
+        trace_number=line[79:94].strip(),          # NACHA pos 80-94 (15 chars)
         batch_number=batch_number,
         sec_code=sec_code,
     )

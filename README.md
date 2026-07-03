@@ -289,6 +289,127 @@ Next planned build steps:
 
 ---
 
+## Folder Structure and Processing Flows
+
+There are two separate file-drop paths. Each is intended for a different demo style.
+
+---
+
+### demo-inbox/ — Button-triggered (Live Folder Mode)
+
+Used by the frontend **Demo Mode OFF** (Live Folder Mode) controls.
+
+Files placed here are processed only when a user clicks the corresponding button in the UI.
+
+```text
+backend/demo-inbox/
+  ccd/            ← drop CCD files here, click "Scan CCD"
+  settlement/     ← drop settlement / scheme-reject files here, click "Check Settlement"
+  scheme-reject/  ← scheme reject files (processed by Check Settlement)
+  returns/        ← drop NACHA return files here, click "Check Returns"
+  processed/      ← files archived here after successful processing
+  under-review/   ← CCD files with syntax errors moved here
+```
+
+Frontend buttons call these backend endpoints:
+
+| Button | Endpoint |
+|---|---|
+| Scan CCD | `POST /api/demo-flow/scan-ccd` |
+| Check Settlement | `POST /api/demo-flow/check-settlement` |
+| Check Returns | `POST /api/demo-flow/check-returns` |
+
+---
+
+### drop/ — Scheduler-triggered (Automatic)
+
+Used by the APScheduler background jobs running inside the backend server.
+
+Files placed here are picked up automatically every 30 seconds without any user action.
+
+```text
+backend/drop/
+  ccd/
+    input/        ← drop CCD files here — auto-processed every 30s
+    processed/    ← valid files moved here after successful parse
+    under-review/ ← files with syntax errors (LLM flagged or invalid records)
+    error/        ← files that could not be parsed at all
+  returns/
+    input/        ← drop NACHA return files here — auto-processed every 30s
+    processed/    ← matched return files moved here
+    error/        ← unprocessable return files moved here
+  settlement/
+    input/        ← drop settlement / scheme-reject files here — auto-processed every 30s
+    processed/    ← processed settlement files moved here
+    error/        ← unprocessable settlement files moved here
+```
+
+Scheduler jobs and their scan targets:
+
+| Job | Watches | Interval |
+|---|---|---|
+| `ccd_scanner` | `drop/ccd/input/` | 30s |
+| `return_file_scanner` | `drop/returns/input/` | 30s |
+| `settlement_scanner` | `drop/settlement/input/` | 30s |
+| `scheme_pusher` | In-memory ledger (WITH_BANK_UPLOADED) | 30s |
+| `settlement_simulator` | In-memory ledger (WITH_SCHEME_SUBMITTED) | 30s |
+
+---
+
+### CCD File Lifecycle in drop/ccd/
+
+```
+drop/ccd/input/
+      │
+      ▼  scheduler picks up file every 30s
+      │
+      ├─── Precondition check passes & parse valid?
+      │         │
+      │         └─── YES → payments created in ledger
+      │                     status: WITH BANK → SENT TO SCHEME (scheme_pusher)
+      │                     file moved to: drop/ccd/processed/
+      │
+      ├─── Parsed but syntax errors?
+      │         │
+      │         └─── YES → LLM fix attempted, result shown in UI
+      │                     file moved to: drop/ccd/under-review/
+      │
+      └─── Unreadable / exception?
+                │
+                └─── YES → file moved to: drop/ccd/error/
+```
+
+---
+
+### Payment Lifecycle (After CCD is Accepted)
+
+```
+WITH BANK
+  │
+  └─── scheme_pusher (every 30s)
+        │
+        ▼
+  SENT TO SCHEME
+        │
+        └─── settlement_simulator (every 30s) or Check Settlement button
+              │
+              ▼
+        WITH BENEFICIARY BANK
+              │
+              └─── return_file_scanner or Check Returns button
+                    │
+                    ▼
+              REJECTED BY BENEFICIARY BANK
+```
+
+Scheme rejects (from drop/settlement/input/ or Check Settlement) move the affected payment back to:
+
+```
+REJECTED BY SCHEME
+```
+
+---
+
 ## Backend Commands
 
 ```powershell

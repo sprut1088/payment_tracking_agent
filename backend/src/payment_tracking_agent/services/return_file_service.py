@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from payment_tracking_agent.agents import llm_fixer
 from payment_tracking_agent.config import settings
 from payment_tracking_agent.ledger import store
 from payment_tracking_agent.models.payment import PaymentStatus
@@ -64,7 +65,24 @@ def process_return_file(file_name: str, content: bytes) -> ProcessedReturnFile:
             store.update_payment_status(
                 upload_id=upload_record.upload_id,
                 trace_number=entry.trace_number,
-                new_status=PaymentStatus.WITH_BENEFICIARY_BANK_PENDING,
+                new_status=PaymentStatus.REJECTED_BY_RETURN_FILE,
+            )
+            reason_desc = RETURN_REASON_DESCRIPTIONS.get(
+                entry.return_reason_code, "Unknown return reason"
+            )
+            explanation = llm_fixer.explain_return_code(
+                return_code=entry.return_reason_code,
+                return_description=reason_desc,
+                individual_name=entry.individual_name,
+                amount=round(entry.amount_cents / 100.0, 2),
+            )
+            store.update_payment_return_info(
+                upload_id=upload_record.upload_id,
+                trace_number=entry.trace_number,
+                return_reason_code=entry.return_reason_code,
+                return_reason_description=reason_desc,
+                customer_message=explanation["customer_message"],
+                corrective_action=explanation["corrective_action"],
             )
             matched_upload_id = upload_record.upload_id
             matched = True
@@ -104,4 +122,11 @@ def process_return_file(file_name: str, content: bytes) -> ProcessedReturnFile:
         unmatched_count=len(records) - matched_count,
     )
     store.save_return_file(result)
+    if matched_count:
+        store.append_event(
+            "ReturnFileAgent",
+            f"Return file processed \u2014 {file_name}: {matched_count} payment(s) matched "
+            f"and advanced to REJECTED BY BENEFICIARY BANK. "
+            f"{result.unmatched_count} unmatched trace(s).",
+        )
     return result

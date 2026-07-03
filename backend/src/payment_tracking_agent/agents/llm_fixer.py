@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import TYPE_CHECKING
 
@@ -132,7 +133,7 @@ Each element must contain exactly:
   {
     "line_number": <int>,
     "corrected_line": "<string, exactly 94 chars>",
-    "explanation": "<brief description of what was reconstructed>"
+    "explanation": "<brief plain-English description of what was fixed>"
   }
 """
 
@@ -151,11 +152,17 @@ def suggest_fixes(
         ``corrected_line``, and ``explanation``.
         Returns an empty list when the LLM is unavailable or the call fails.
     """
-    print("LLM fixer called with errored_lines:", errored_lines)
     if not errored_lines:
         return []
 
-    if not settings.llm_api_key and not settings.anthropic_api_key:
+    # Fall back to os.environ directly in case pydantic-settings env_prefix
+    # prevented the non-prefixed key from being read from the .env file.
+    _env_anthropic = (
+        os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("PTA_ANTHROPIC_API_KEY")
+    )
+
+    if not settings.llm_api_key and not settings.anthropic_api_key and not _env_anthropic:
         logger.warning("No LLM API key configured — skipping LLM fix suggestions.")
         return []
 
@@ -163,16 +170,16 @@ def suggest_fixes(
     model = settings.llm_model
     max_tok = settings.llm_max_tokens
 
-    # Select the API key for the chosen provider
-    print("provider:", provider)
     if provider == "anthropic":
-        api_key = settings.anthropic_api_key or settings.llm_api_key
+        api_key = settings.anthropic_api_key or settings.llm_api_key or _env_anthropic
     else:
-        api_key = settings.llm_api_key or settings.anthropic_api_key
+        api_key = settings.llm_api_key or settings.anthropic_api_key or _env_anthropic
 
     if not api_key:
         logger.warning("No API key found for provider '%s' — skipping.", provider)
         return []
+
+    logger.info("LLM fixer: provider=%s model=%s max_tokens=%d", provider, model, max_tok)
 
     # Build the user message — group all errored lines into one request
     lines_block = "\n\n".join(
@@ -188,6 +195,7 @@ def suggest_fixes(
     )
     user_message = f"Fix the following ACH CCD file lines:\n\n{lines_block}\n\nReturn a JSON array only."
 
+    raw_text = ""
     try:
         if provider == "anthropic":
             try:
@@ -198,13 +206,11 @@ def suggest_fixes(
             client = Anthropic(api_key=api_key)
             response = client.messages.create(
                 model=model,
+                max_tokens=max_tok,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_message}],
-                temperature=0,
-                max_tokens=8192,
             )
-            print("Anthropic response:", response)
-            raw_json = response.content[0].text
+            raw_text = response.content[0].text if response.content else ""
         else:
             try:
                 from openai import OpenAI  # noqa: PLC0415
@@ -217,57 +223,148 @@ def suggest_fixes(
             )
             response = client.chat.completions.create(
                 model=model,
+                max_tokens=max_tok,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},
                 ],
-                response_format={"type": "json_object"},
-                temperature=0,
             )
-            raw_json = response.choices[0].message.content or "{}"
-        # Strip markdown code fences — models add them despite being told not to
-        raw_json = _strip_code_fences(raw_json)
-        print("LLM raw JSON response (stripped):", raw_json[:200])
-        payload = json.loads(raw_json)
-        # LLM may wrap the array in a key — unwrap if needed
-        suggestions: list[dict] = payload if isinstance(payload, list) else next(
-            (v for v in payload.values() if isinstance(v, list)), []
-        )
-    except Exception as exc:
-        import traceback
-        # Log full stack trace so the root cause is visible in the server console
-        logger.error("LLM fix call failed (%s): %s", type(exc).__name__, exc, exc_info=True)
-        print("=== LLM ERROR ===")
-        print(f"Provider : {provider}")
-        print(f"Model    : {model}")
-        print(f"Type     : {type(exc).__name__}")
-        print(f"Detail   : {exc}")
-        traceback.print_exc()
-
-        exc_str = str(exc).lower()
-        if "connection" in exc_str or "connect" in exc_str:
-            print(
-                "HINT: Connection error — check that the host can reach "
-                f"{'api.anthropic.com' if provider == 'anthropic' else 'api.openai.com'}. "
-                "If behind a corporate proxy, set PTA_LLM_BASE_URL or configure "
-                "HTTP_PROXY / HTTPS_PROXY environment variables."
-            )
-        elif "auth" in exc_str or "401" in exc_str or "403" in exc_str:
-            print("HINT: Authentication error — verify your API key is correct and active.")
-        elif "rate" in exc_str or "429" in exc_str:
-            print("HINT: Rate-limit error — the API key has hit its request quota.")
-
-        print("=================")
+            raw_text = response.choices[0].message.content or ""
+    except Exception as exc:  # noqa: BLE001
+        logger.error("LLM request failed: %s", exc, exc_info=True)
         return []
 
-    # Merge back with the original lines so callers always have both sides
-    original_map = {ln: raw for ln, raw, _ in errored_lines}
-    return [
-        {
-            "line_number": s.get("line_number"),
-            "original_line": original_map.get(s.get("line_number"), ""),
-            "corrected_line": s.get("corrected_line", ""),
-            "explanation": s.get("explanation", ""),
-        }
-        for s in suggestions
-    ]
+    raw_text = _strip_code_fences(raw_text)
+
+    try:
+        suggestions = json.loads(raw_text)
+    except json.JSONDecodeError:
+        salvaged = _salvage_truncated_array(raw_text)
+        try:
+            suggestions = json.loads(salvaged)
+            logger.warning("LLM response was truncated — salvaged %d suggestions.", len(suggestions))
+        except json.JSONDecodeError:
+            logger.error("Could not parse LLM response as JSON: %r", raw_text[:200])
+            return []
+
+    result = []
+    for item in suggestions:
+        if not isinstance(item, dict):
+            continue
+        ln = item.get("line_number")
+        corrected = item.get("corrected_line", "")
+        explanation = item.get("explanation", "")
+        if ln is None or not corrected:
+            continue
+        # Find the original line
+        original = next((raw for num, raw, _ in errored_lines if num == ln), "")
+        result.append({
+            "line_number": ln,
+            "original_line": original,
+            "corrected_line": corrected,
+            "explanation": explanation,
+        })
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Return code explanation
+# ---------------------------------------------------------------------------
+
+_RETURN_EXPLAIN_SYSTEM = """\
+You are an ACH payment operations expert. A NACHA return code has been received.
+Explain what happened in plain language a bank operations user can act on.
+Do NOT invent payment details beyond what is provided.
+Respond with a JSON object only — no markdown, no prose.
+The object must contain exactly:
+{
+  "customer_message": "<one sentence a bank can send to the originating company explaining why the payment was returned>",
+  "corrective_action": "<one to two sentences describing what the originator should do next>"
+}
+"""
+
+
+def explain_return_code(
+    return_code: str,
+    return_description: str,
+    individual_name: str,
+    amount: float,
+) -> dict[str, str]:
+    """Call the LLM to explain a NACHA return reason code and suggest a fix.
+
+    Returns a dict with keys ``customer_message`` and ``corrective_action``.
+    Falls back to static text if no LLM key is configured or the call fails.
+    """
+    fallback = {
+        "customer_message": (
+            f"Your ACH payment of ${amount:.2f} to {individual_name} was returned "
+            f"by the beneficiary bank with reason code {return_code}: {return_description}."
+        ),
+        "corrective_action": (
+            f"Review the return code {return_code} and correct the underlying issue "
+            "before resubmitting the payment."
+        ),
+    }
+
+    _env_anthropic = (
+        os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("PTA_ANTHROPIC_API_KEY")
+    )
+    if not settings.llm_api_key and not settings.anthropic_api_key and not _env_anthropic:
+        logger.warning("No LLM key — using static return code explanation for %s.", return_code)
+        return fallback
+
+    provider = (settings.llm_provider or "openai").lower()
+    model = settings.llm_model
+    if provider == "anthropic":
+        api_key = settings.anthropic_api_key or settings.llm_api_key or _env_anthropic
+    else:
+        api_key = settings.llm_api_key or settings.anthropic_api_key or _env_anthropic
+
+    if not api_key:
+        return fallback
+
+    user_message = (
+        f"A NACHA ACH payment of ${amount:.2f} to '{individual_name}' was returned.\n"
+        f"Return code: {return_code} — {return_description}\n\n"
+        "Respond with the JSON object only."
+    )
+
+    try:
+        raw_text = ""
+        if provider == "anthropic":
+            from anthropic import Anthropic  # noqa: PLC0415
+            client = Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=512,
+                system=_RETURN_EXPLAIN_SYSTEM,
+                messages=[{"role": "user", "content": user_message}],
+            )
+            raw_text = response.content[0].text if response.content else ""
+        else:
+            from openai import OpenAI  # noqa: PLC0415
+            client = OpenAI(api_key=api_key, base_url=settings.llm_base_url or None)
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=512,
+                messages=[
+                    {"role": "system", "content": _RETURN_EXPLAIN_SYSTEM},
+                    {"role": "user", "content": user_message},
+                ],
+            )
+            raw_text = response.choices[0].message.content or ""
+
+        raw_text = _strip_code_fences(raw_text)
+        parsed = json.loads(raw_text)
+        if isinstance(parsed, dict) and "customer_message" in parsed and "corrective_action" in parsed:
+            logger.info("LLM explained return code %s for %s", return_code, individual_name)
+            return {
+                "customer_message": str(parsed["customer_message"]),
+                "corrective_action": str(parsed["corrective_action"]),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.error("LLM return code explanation failed: %s", exc, exc_info=True)
+
+    return fallback

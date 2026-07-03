@@ -1,30 +1,81 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { BatchSummary, PaymentRecord } from "../types/api";
+import type { BatchSummary, PaymentRecord, UnderReviewItem } from "../types/api";
+import { CcdReviewPanel } from "./CcdReviewPanel";
 import { StatusBadge } from "./StatusBadge";
 
 interface BatchDashboardProps {
   onSelectPayment?: (payment: PaymentRecord) => void;
+  demoMode: boolean;
+  refreshKey?: number;
 }
 
-export function BatchDashboard({ onSelectPayment }: BatchDashboardProps) {
+export function BatchDashboard({ onSelectPayment, demoMode, refreshKey }: BatchDashboardProps) {
   const [batches, setBatches] = useState<BatchSummary[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [reviewItems, setReviewItems] = useState<UnderReviewItem[]>([]);
   const [batchFilter, setBatchFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const prevDemoModeRef = useRef(demoMode);
+
+  const loadData = () => {
+    setError(null);
+    const batchCall = demoMode ? api.getBatchDashboard() : api.getBatchDashboardLive();
+    const paymentsCall = demoMode ? api.listPayments() : api.listPaymentsLive();
+    const reviewCall = demoMode
+      ? Promise.resolve([] as UnderReviewItem[])
+      : api.getUnderReview();
+    return Promise.all([batchCall, paymentsCall, reviewCall]);
+  };
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([api.getBatchDashboard(), api.listPayments()]).then(([b, p]) => {
-      if (!mounted) return;
-      setBatches(b.rows);
-      setPayments(p);
-      if (b.rows.length > 0) setBatchFilter(b.rows[0].batchId);
-    });
+    setError(null);
+    // Only clear data when demoMode flips (mock ↔ live are incompatible).
+    // When refreshKey increments (revisiting the page), keep existing rows
+    // visible while the background re-fetch completes.
+    const modeChanged = prevDemoModeRef.current !== demoMode;
+    prevDemoModeRef.current = demoMode;
+    if (modeChanged) {
+      setBatches([]);
+      setPayments([]);
+      setReviewItems([]);
+    }
+    loadData()
+      .then(([b, p, r]) => {
+        if (!mounted) return;
+        setBatches(b.rows);
+        setPayments(p);
+        setReviewItems(r);
+        if (b.rows.length > 0) setBatchFilter(b.rows[0].batchId);
+      })
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : "Failed to load payments from backend.");
+      });
     return () => {
       mounted = false;
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoMode, refreshKey]);
+
+  // Auto-refresh every 30 s in live mode so scheduler-driven status changes appear
+  // without requiring the user to navigate away and back.
+  useEffect(() => {
+    if (demoMode) return;
+    const id = setInterval(() => {
+      loadData()
+        .then(([b, p, r]) => {
+          setBatches(b.rows);
+          setPayments(p);
+          setReviewItems(r);
+        })
+        .catch(() => undefined);
+    }, 30_000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoMode]);
 
   const filtered = useMemo(
     () =>
@@ -37,15 +88,40 @@ export function BatchDashboard({ onSelectPayment }: BatchDashboardProps) {
   );
 
   return (
-    <section className="card">
-      <header className="card__header">
-        <h2 className="card__title">Batch dashboard</h2>
-        <p className="card__subtitle">
-          Payments grouped by batch and cycle. Filter by batch or status to
-          focus on a specific slice. Settlement records are summary evidence,
-          not payment-level clearing evidence.
-        </p>
-      </header>
+    <>
+      {/* Review queue shown only in Live Folder Mode when there are items to review */}
+      {!demoMode && (
+        <CcdReviewPanel
+          items={reviewItems}
+          onReviewed={() => {
+            // Refresh all data after accept or reject
+            loadData()
+              .then(([b, p, r]) => {
+                setBatches(b.rows);
+                setPayments(p);
+                setReviewItems(r);
+                if (b.rows.length > 0 && batchFilter === "") setBatchFilter(b.rows[0].batchId);
+              })
+              .catch(() => undefined);
+          }}
+        />
+      )}
+
+      <section className="card">
+        <header className="card__header">
+          <h2 className="card__title">Batch dashboard</h2>
+          <p className="card__subtitle">
+            {demoMode
+              ? "Demo Mode ON — predefined SME-aligned mock data."
+              : "Live Folder Mode — data loaded from backend payment ledger."}
+          </p>
+        </header>
+
+        {error && (
+        <div className="card__error">
+          Backend error: {error}
+        </div>
+      )}
 
       <div className="batch-summary">
         {batches.map((b) => (
@@ -170,5 +246,6 @@ export function BatchDashboard({ onSelectPayment }: BatchDashboardProps) {
         settlement summary, scheme reject, and return-file sources.
       </p>
     </section>
+    </>
   );
 }

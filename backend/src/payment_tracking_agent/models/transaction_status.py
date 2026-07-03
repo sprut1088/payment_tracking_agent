@@ -26,6 +26,11 @@ class TransactionStatus(BaseModel):
     status: str
     business_status: str
     corrective_action: str | None = None
+    return_reason_code: str | None = None
+    return_reason_description: str | None = None
+    return_customer_message: str | None = None
+    risk_level: str = "LOW"
+    risk_reason: str | None = None
 
 
 class FileTransactionsResponse(BaseModel):
@@ -70,3 +75,24 @@ class PaymentListItem(BaseModel):
     status: str
     business_status: str
     corrective_action: str | None = None
+    return_reason_code: str | None = None
+    return_reason_description: str | None = None
+    return_customer_message: str | None = None
+    risk_level: str = "LOW"
+    risk_reason: str | None = None
+
+
+class CustomerSummaryItem(BaseModel):
+    """Aggregated customer view — one row per unique individual_id_number."""
+
+    customer_id: str
+    customer_name: str
+    total_payments: int
+    sent_to_scheme: int
+    with_beneficiary_bank: int
+    rejected_by_scheme: int
+    rejected_by_beneficiary_bank: int
+    last_rejection_date: str | None = None
+    historical_rejection_count: int
+    risk_level: str = "LOW"
+    risk_reason: str | None = None

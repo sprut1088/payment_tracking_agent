@@ -1,10 +1,30 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CustomerDashboard } from "../components/CustomerDashboard";
 import { PaymentDetailDrawer } from "../components/PaymentDetailDrawer";
 import type { PaymentRecord } from "../types/api";
 
-export function CustomerDashboardPage() {
+interface CustomerDashboardPageProps {
+  demoMode: boolean;
+  isActive?: boolean;
+}
+
+export function CustomerDashboardPage({ demoMode, isActive }: CustomerDashboardPageProps) {
   const [selected, setSelected] = useState<PaymentRecord | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const mountedOnce = useRef(false);
+  const prevActive = useRef(false);
+
+  useEffect(() => {
+    if (!mountedOnce.current) {
+      mountedOnce.current = true;
+      prevActive.current = isActive === true;
+      return;
+    }
+    if (isActive && !prevActive.current) {
+      setRefreshKey((k) => k + 1);
+    }
+    prevActive.current = isActive === true;
+  }, [isActive]);
 
   return (
     <div className="page">
@@ -13,13 +33,15 @@ export function CustomerDashboardPage() {
           <div className="page__eyebrow">Operations</div>
           <h1 className="page__title">Customer Dashboard</h1>
           <p className="page__subtitle">
-            All payments for a customer across batches and dates, with historical
-            rejection context. Demo Mode ON uses the scripted SME-aligned story.
+            {demoMode
+              ? "Demo Mode ON — showing predefined SME-aligned mock data."
+              : "Live Folder Mode — no mock data is shown. Upload a CCD file via the Demo Simulator to populate this view."}
           </p>
         </div>
       </header>
 
-      <CustomerDashboard onSelectPayment={setSelected} />
+      {/* CustomerDashboard handles its own data source based on demoMode */}
+      <CustomerDashboard onSelectPayment={setSelected} demoMode={demoMode} refreshKey={refreshKey} />
       <PaymentDetailDrawer payment={selected} onClose={() => setSelected(null)} />
     </div>
   );
