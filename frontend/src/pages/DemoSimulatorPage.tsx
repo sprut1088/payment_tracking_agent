@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { AgentTracePanel } from "../components/AgentTracePanel";
 import { CycleTimeline } from "../components/CycleTimeline";
+import { LiveFolderRunbook } from "../components/LiveFolderRunbook";
 import { LocalFolderDemoControls } from "../components/LocalFolderDemoControls";
 import { PaymentStatusBoard } from "../components/PaymentStatusBoard";
 import { ScenarioConfigPanel } from "../components/ScenarioConfigPanel";
@@ -45,8 +46,8 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
           <h1 className="page__title">Demo Simulator</h1>
           <p className="page__subtitle">
             {demoMode
-              ? "Demo Mode ON: showing predefined SME-aligned mock story (11:00 and 11:04 cycles)."
-              : "Demo Mode OFF: backend local-folder controls are active below. Dashboards remain mocked for presentation."}
+              ? "Demo Mode ON: scripted SME-aligned mock story."
+              : "Demo Mode OFF: live backend folder controls drive the parsed ledger. Dashboards below remain mocked for presentation."}
           </p>
         </div>
         <div className="clock">
@@ -65,14 +66,18 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
           <header className="card__header">
             <h2 className="card__title">Demo Mode ON</h2>
             <p className="card__subtitle">
-              Local-folder backend controls are hidden in this mode. Use the
-              top-right toggle to switch OFF Demo Mode and run ensure/scan/check
-              actions against backend endpoints.
+              Demo Mode ON: scripted SME-aligned mock story. Local-folder
+              backend controls are hidden in this mode. Use the top-right
+              toggle to switch Demo Mode OFF and drive the live backend ledger
+              via the runbook below.
             </p>
           </header>
         </section>
       ) : (
-        <LocalFolderDemoControls />
+        <>
+          <LiveFolderRunbook />
+          <LocalFolderDemoControls />
+        </>
       )}
 
       <div className="grid grid--2">

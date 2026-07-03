@@ -1412,6 +1412,90 @@ button {
   font-size: 0.85rem;
 }
 
+/* ---------------- Live Folder Demo Runbook ---------------- */
+
+.runbook__steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.runbook__step {
+  display: grid;
+  grid-template-columns: 2.25rem 1fr;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.runbook__step-number {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  background: rgba(110, 168, 254, 0.18);
+  color: #bfdbfe;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.runbook__step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.runbook__step-label {
+  font-weight: 600;
+}
+
+.runbook__command {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.runbook__command code {
+  white-space: pre;
+}
+
+.runbook__step-hint {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.runbook__final {
+  margin-top: 0.9rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(110, 168, 254, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(110, 168, 254, 0.1);
+}
+
+.runbook__final-label {
+  color: #bfdbfe;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.runbook__final-body {
+  font-size: 0.9rem;
+}
+
 /* ---------------- Live payment detail card ---------------- */
 
 .live-detail__header {

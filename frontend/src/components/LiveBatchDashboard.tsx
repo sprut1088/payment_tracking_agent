@@ -13,7 +13,7 @@ import type { PaymentLedgerView } from "../types/api";
 import { StatusBadge } from "./StatusBadge";
 
 const EMPTY_STATE_MESSAGE =
-  "No live ledger payments yet. Go to Demo Simulator, seed CCD files, then click Scan CCD.";
+  "No live ledger payments yet. Go to Demo Simulator, switch Demo Mode OFF, seed CCD files, then click Scan CCD.";
 
 const LIVE_MODE_SUBTITLE =
   "Live backend ledger from parsed CCD and file evidence. Settlement summary is not payment-level clearing evidence.";

@@ -363,8 +363,8 @@ export function LocalFolderDemoControls() {
               {ledgerPayments.length === 0 && (
                 <tr>
                   <td colSpan={7} className="table__empty">
-                    No live ledger payments yet. Seed CCD files, then click
-                    Scan CCD.
+                    No live ledger payments yet. Go to Demo Simulator, switch
+                    Demo Mode OFF, seed CCD files, then click Scan CCD.
                   </td>
                 </tr>
               )}

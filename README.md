@@ -326,6 +326,65 @@ npm run dev
 
 ---
 
+## End-to-End Demo Runbook
+
+The app has two demo modes. Use the top-right Demo Mode toggle to switch.
+
+### Demo Mode ON
+
+- Use for scripted presentation.
+- No backend files required.
+- Shows the SME-aligned mocked flow (11:00 and 11:04 cycles).
+- Dashboards and Payment Search use scripted mock records only.
+
+### Demo Mode OFF
+
+Use to drive the live backend ledger from parsed CCD, settlement, scheme-reject, and NACHA return files.
+
+Start the backend and frontend in separate terminals:
+
+```powershell
+cd C:\git_repos\payment_tracking_agent\backend
+python -m uvicorn payment_tracking_agent.main:app --reload --port 8000
+```
+
+```powershell
+cd C:\git_repos\payment_tracking_agent\frontend
+npm run dev
+```
+
+Then run the seeding sequence from the repo root:
+
+```powershell
+cd C:\git_repos\payment_tracking_agent
+
+.\scripts\seed-local-demo-files.ps1 -Phase clean
+
+.\scripts\seed-local-demo-files.ps1 -Phase ccd
+# Click Scan CCD in the Demo Simulator page
+
+.\scripts\seed-local-demo-files.ps1 -Phase settlement
+# Click Check settlement in the Demo Simulator page
+
+.\scripts\seed-local-demo-files.ps1 -Phase returns
+# Click Check returns in the Demo Simulator page
+```
+
+Open Batch Dashboard, Customer Dashboard, or Payment Search to inspect the live ledger. Each live view is labeled `Live backend ledger from parsed CCD and file evidence`.
+
+### Expected Final Ledger Counts
+
+After the four-phase seeding sequence completes, the live payment ledger should report:
+
+- 14 `WITH BENEFICIARY BANK`
+- 1 `REJECTED BY SCHEME`
+- 1 `REJECTED BY BENEFICIARY BANK`
+- 0 `CLEARED`
+
+FedACH settlement summary is summary-level evidence only. The demo does not mark individual payments as cleared from settlement summary.
+
+---
+
 ## Important Design Rule
 
 Do not mark individual customer payments as cleared using summary-only settlement files.

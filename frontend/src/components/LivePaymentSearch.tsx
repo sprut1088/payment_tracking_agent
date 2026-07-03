@@ -9,7 +9,7 @@ import type { LedgerPayment, PaymentLedgerView } from "../types/api";
 import { StatusBadge } from "./StatusBadge";
 
 const EMPTY_STATE_MESSAGE =
-  "No live ledger payments yet. Go to Demo Simulator, seed CCD files, then click Scan CCD.";
+  "No live ledger payments yet. Go to Demo Simulator, switch Demo Mode OFF, seed CCD files, then click Scan CCD.";
 
 function matchesQuery(payment: LedgerPayment, needle: string): boolean {
   if (!needle) return true;
