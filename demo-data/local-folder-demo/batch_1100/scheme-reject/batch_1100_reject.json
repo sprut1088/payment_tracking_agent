@@ -6,19 +6,19 @@
   "file_name": "batch_1100_reject.json",
   "summary": {
     "rejected_payment_count": 1,
-    "rejected_amount": 100.00,
+    "rejected_amount": 298.75,
     "currency": "USD"
   },
   "rejections": [
     {
-      "payment_trace_number": "110000000000004",
+      "payment_trace_number": "123456780000004",
       "customer_id": "CUST-004",
       "customer_name": "Delta Imports LLC",
-      "amount": 100.00,
+      "amount": 298.75,
       "reason_code": "SCHEME-VAL-001",
       "reason": "Receiving DFI identification failed scheme validation.",
       "recommended_action": "Correct the beneficiary bank routing details and resubmit the payment in a new CCD batch."
     }
   ],
-  "demo_note": "Demo-only scheme rejection fixture. This represents one $100 payment rejected by the scheme. Settlement summary is not payment-level clearing evidence."
+  "demo_note": "Demo-only scheme rejection fixture. This represents one payment rejected by the scheme. Settlement summary is not payment-level clearing evidence."
 }

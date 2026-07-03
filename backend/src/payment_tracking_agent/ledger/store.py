@@ -7,8 +7,14 @@ replayed from a clean state alongside the folder-watcher scenario store.
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 
-from payment_tracking_agent.models.ledger import Payment
+from payment_tracking_agent.models.ledger import (
+    Payment,
+    PaymentEvidence,
+    PaymentStatus,
+    PaymentStatusEvent,
+)
 
 
 class PaymentLedger:
@@ -37,9 +43,35 @@ class PaymentLedger:
         with self._lock:
             return list(self._payments.values())
 
+    def list_by_batch(self, batch_key: str) -> list[Payment]:
+        with self._lock:
+            return [p for p in self._payments.values() if p.batch_key == batch_key]
+
     def get_payment(self, payment_id: str) -> Payment | None:
         with self._lock:
             return self._payments.get(payment_id)
+
+    def append_status(
+        self,
+        payment_id: str,
+        status: PaymentStatus,
+        evidence: PaymentEvidence,
+        at: datetime,
+    ) -> Payment | None:
+        """Record a new status event on a payment.
+
+        No-op if the payment is already at the target status or does not exist.
+        """
+        with self._lock:
+            payment = self._payments.get(payment_id)
+            if payment is None or payment.current_status == status:
+                return payment
+            payment.current_status = status
+            payment.status_history.append(
+                PaymentStatusEvent(status=status, at=at, evidence=evidence)
+            )
+            payment.evidence.append(evidence)
+            return payment
 
 
 _ledger = PaymentLedger()
