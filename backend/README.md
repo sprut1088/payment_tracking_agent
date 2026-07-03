@@ -1,32 +1,205 @@
 # Backend — ACH Payment Tracking Agent
 
-Python backend that will host the multi-agent workflow, payment status ledger,
-demo simulator, and REST API consumed by the frontend.
+Python / FastAPI backend for the end-to-end ACH payment flow tracking platform.
 
-At this bootstrap stage the package only exposes a FastAPI application with a
-health endpoint and placeholder agent modules. No ACH parsing, ledger logic,
-or LLM logic is implemented yet.
+Tracks every payment across the full lifecycle:
+**WITH BANK → WITH SCHEME → WITH BENEFICIARY BANK → CLEARED / REJECTED**
+
+---
+
+## What's included
+
+| Layer | Description |
+|---|---|
+| **REST API** | 9 FastAPI endpoints with Swagger UI |
+| **CCD upload** | Parse, syntax-validate, LLM-fix, and persist NACHA CCD files |
+| **Return file** | Parse NACHA return files, match traces, update payment status |
+| **Settlement file** | Parse rejection files, call LLM for corrective actions |
+| **Scheduler** | 3 APScheduler jobs — scheme push, return scan, settlement scan |
+| **In-memory store** | Dict-based temp DB (upload records, return files, settlement files) |
+
+---
 
 ## Requirements
 
 - Python 3.11+
+- (Optional) An OpenAI-compatible API key for LLM features
+
+---
 
 ## Install
 
+### Option A — System Python, no venv (corporate / Group Policy environments)
+
+If PowerShell blocks `.ps1` scripts (Group Policy), skip the venv and install
+directly into your system Python:
+
 ```powershell
-cd backend
+python -m pip install -r requirements.txt
+```
+
+Or install the package in editable mode:
+
+```powershell
+python -m pip install -e .
+```
+
+> **Tip:** Always use `python -m pip` instead of calling `pip` directly — it
+> guarantees you're installing into the same Python that will run the app.
+
+### Option B — venv via cmd.exe (avoids the PS execution policy block)
+
+```cmd
+python -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+```
+
+### Option C — venv in PowerShell (requires execution policy change)
+
+```powershell
+# Run once as administrator (if permitted):
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+python -m pip install -r requirements.txt
 ```
+
+---
 
 ## Run
 
+### Recommended — python -m uvicorn (works in any venv or system Python)
+
 ```powershell
-uvicorn payment_tracking_agent.main:app --reload --port 8000
+python -m uvicorn payment_tracking_agent.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Then visit http://localhost:8000/health.
+### Using the uvicorn CLI directly (if uvicorn is on PATH)
+
+```powershell
+uvicorn payment_tracking_agent.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Using the package entry-point
+
+```powershell
+payment-tracking-agent
+```
+
+Once running, open:
+
+| URL | Description |
+|---|---|
+| http://localhost:8000/docs | **Swagger UI** (interactive API explorer) |
+| http://localhost:8000/redoc | ReDoc (alternative docs) |
+| http://localhost:8000/health | Health check |
+| http://localhost:8000/openapi.json | Raw OpenAPI schema |
+
+---
+
+## Environment variables
+
+All settings use the `PTA_` prefix and can be set in a `.env` file in the
+`backend/` directory or as real environment variables.
+
+```env
+# LLM (optional — leave unset to skip LLM features)
+PTA_LLM_API_KEY=sk-...
+PTA_LLM_MODEL=gpt-4o-mini
+PTA_LLM_BASE_URL=                        # leave blank for OpenAI; set for Azure
+
+# File storage directories (created automatically on first use)
+PTA_UPLOAD_DIR=uploaded_files/ccd
+PTA_RETURN_DIR=uploaded_files/returns
+PTA_SCHEME_DIR=uploaded_files/scheme
+PTA_SETTLEMENT_DIR=uploaded_files/settlement
+
+# Scheduler drop folders (place files here for automatic processing)
+PTA_RETURN_SCAN_DIR=drop/returns
+PTA_SETTLEMENT_SCAN_DIR=drop/settlement
+
+# Scheduler intervals in seconds (default 30)
+PTA_RETURN_SCAN_INTERVAL_SECONDS=30
+PTA_SCHEME_PUSH_INTERVAL_SECONDS=30
+PTA_SETTLEMENT_SCAN_INTERVAL_SECONDS=30
+
+# CORS (comma-separated origins)
+PTA_CORS_ORIGINS=["http://localhost:5173"]
+```
+
+---
+
+## API endpoints
+
+### CCD Upload
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/upload/ccd` | Upload CCD file — validates, LLM-fixes errors, saves |
+| `GET` | `/api/v1/uploads` | List all uploaded CCD files |
+| `GET` | `/api/v1/uploads/{id}` | Full upload detail with all payment records |
+
+### Return Files
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/upload/return` | Upload NACHA return file — matches traces, updates status |
+| `GET` | `/api/v1/returns` | List processed return files |
+| `GET` | `/api/v1/returns/{id}` | Return file detail |
+
+### Settlement Files
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/upload/settlement` | Upload settlement rejection file — LLM corrective actions |
+| `GET` | `/api/v1/settlements` | List processed settlement files |
+| `GET` | `/api/v1/settlements/{id}` | Settlement detail with LLM suggestions |
+
+---
+
+## Background schedulers
+
+Three jobs start automatically when the app boots:
+
+| Job | Polls | What it does |
+|---|---|---|
+| `scheme_pusher` | in-memory store | Copies `WITH_BANK_UPLOADED` files → `scheme_dir`, advances to `WITH_SCHEME_SUBMITTED` |
+| `return_file_scanner` | `drop/returns/` | Processes any new `.ach` / `.txt` files, updates matched payments |
+| `settlement_scanner` | `drop/settlement/` | Processes any new `.csv` / `.txt` / `.dat` files, calls LLM, updates payments |
+
+To trigger processing without waiting, place a file in the relevant drop folder
+or use the corresponding upload API endpoint.
+
+---
+
+## Project structure
+
+```
+src/payment_tracking_agent/
+├── main.py                  ← FastAPI app factory + scheduler lifespan
+├── config.py                ← Settings (env-overridable)
+├── api/routes.py            ← Thin HTTP handlers only
+├── services/                ← Business logic
+│   ├── upload_service.py
+│   ├── return_file_service.py
+│   ├── scheme_service.py
+│   └── settlement_service.py
+├── parsers/                 ← Pure file format parsers
+│   ├── ccd.py
+│   ├── return_file.py
+│   └── settlement.py
+├── validators/ccd_validator.py
+├── agents/                  ← LLM integrations
+│   ├── llm_fixer.py         ← Syntax fix suggestions
+│   └── llm_advisor.py       ← Rejection corrective actions
+├── models/                  ← Pydantic models
+│   ├── payment.py
+│   ├── validation.py
+│   ├── return_file.py
+│   └── settlement.py
+├── ledger/store.py          ← In-memory temp DB
+└── scheduler/scheduler.py  ← APScheduler jobs
+```
+
 
 ## Seed Sample Local Demo Files
 
