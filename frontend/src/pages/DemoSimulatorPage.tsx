@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { AgentTracePanel } from "../components/AgentTracePanel";
 import { CycleTimeline } from "../components/CycleTimeline";
+import { LocalFolderDemoControls } from "../components/LocalFolderDemoControls";
 import { PaymentStatusBoard } from "../components/PaymentStatusBoard";
 import { ScenarioConfigPanel } from "../components/ScenarioConfigPanel";
 import type { AgentTraceStep, SimulationState } from "../types/api";
@@ -53,6 +54,8 @@ export function DemoSimulatorPage() {
       </header>
 
       <ScenarioConfigPanel />
+
+      <LocalFolderDemoControls />
 
       <div className="grid grid--2">
         <PaymentStatusBoard state={state} />

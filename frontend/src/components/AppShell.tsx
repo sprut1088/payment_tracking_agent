@@ -44,8 +44,8 @@ export function AppShell({ activeNav, onNavigate, children }: AppShellProps) {
         <div className="shell__footer">
           <div className="shell__footer-title">Demo mode</div>
           <div className="shell__footer-body">
-            All data below is mocked in the frontend. Backend, ledger, and LLM
-            logic are implemented in later build steps.
+            Dashboards remain fixture-driven, while local folder controls now
+            call backend /api/demo-flow endpoints.
           </div>
         </div>
       </aside>

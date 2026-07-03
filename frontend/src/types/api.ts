@@ -156,3 +156,63 @@ export interface DashboardResponse<T> {
   rows: T[];
   generatedAt: string;
 }
+
+export type DemoFlowFileKind = "ccd" | "settlement" | "scheme_reject" | "return";
+
+export type DemoFlowBatchStatus =
+  | "AWAITING_SETTLEMENT"
+  | "AWAITING_RETURNS"
+  | "COMPLETE";
+
+export type SettlementSchemeEvidenceStatus =
+  | "NONE_AVAILABLE"
+  | "SETTLEMENT_AVAILABLE"
+  | "SCHEME_REJECT_AVAILABLE"
+  | "SETTLEMENT_AND_SCHEME_REJECT_AVAILABLE";
+
+export interface DemoFlowDetectedFile {
+  path: string;
+  filename: string;
+  kind: DemoFlowFileKind;
+  size_bytes: number;
+  modified_at: string;
+  discovered_at: string;
+}
+
+export interface DemoFlowBatch {
+  batch_id: string;
+  ccd_file: DemoFlowDetectedFile;
+  uploaded_at: string;
+  expected_settlement_scan_at: string;
+  expected_returns_scan_at: string;
+  status: DemoFlowBatchStatus;
+  settlement_scheme_status: SettlementSchemeEvidenceStatus;
+  settlement_files: DemoFlowDetectedFile[];
+  scheme_reject_files: DemoFlowDetectedFile[];
+  return_files: DemoFlowDetectedFile[];
+}
+
+export interface DemoFlowScanResult {
+  scanned_at: string;
+  new_files: DemoFlowDetectedFile[];
+  new_batches: string[];
+  batches_advanced: string[];
+}
+
+export interface DemoFlowState {
+  as_of: string;
+  batches: DemoFlowBatch[];
+  detected_files: DemoFlowDetectedFile[];
+}
+
+export interface DemoFlowConfig {
+  demo_flow_root: string;
+  inbox_dir: string;
+  settlement_dir: string;
+  scheme_reject_dir: string;
+  returns_dir: string;
+  processed_dir: string;
+  settlement_delay_seconds: number;
+  returns_delay_seconds: number;
+  poll_interval_seconds: number;
+}

@@ -1,11 +1,14 @@
-// Mock API client for the ACH Payment Tracking Agent frontend demo shell.
-// All values are hard-coded fixtures; no network requests are made.
-// This will be replaced by a real HTTP client in a later prompt.
+// API client for the ACH Payment Tracking Agent frontend demo shell.
+// Most pages still use mock fixtures, while local-folder demo-flow controls
+// call the backend HTTP endpoints under /api/demo-flow.
 
 import type {
   AgentTraceStep,
   BatchSummary,
   CustomerSummary,
+  DemoFlowConfig,
+  DemoFlowScanResult,
+  DemoFlowState,
   DashboardResponse,
   EvidenceRef,
   PaymentRecord,
@@ -536,11 +539,40 @@ const agentTrace: AgentTraceStep[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Public mock API
+// Public API (mock fixtures + backend demo-flow endpoints)
 // ---------------------------------------------------------------------------
 
 function delay<T>(value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), 50));
+}
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = (await response.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // Ignore JSON parsing errors and keep default detail.
+    }
+    throw new Error(detail);
+  }
+  return (await response.json()) as T;
+}
+
+async function requestNoContent(url: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = (await response.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // Ignore JSON parsing errors and keep default detail.
+    }
+    throw new Error(detail);
+  }
 }
 
 export const api = {
@@ -592,6 +624,42 @@ export const api = {
           p.batchId.toLowerCase().includes(q),
       ),
     );
+  },
+
+  getDemoFlowConfig(): Promise<DemoFlowConfig> {
+    return requestJson<DemoFlowConfig>("/api/demo-flow/config");
+  },
+
+  ensureDemoFlowFolders(): Promise<DemoFlowConfig> {
+    return requestJson<DemoFlowConfig>("/api/demo-flow/ensure-folders", {
+      method: "POST",
+    });
+  },
+
+  scanDemoFlowCcd(): Promise<DemoFlowScanResult> {
+    return requestJson<DemoFlowScanResult>("/api/demo-flow/scan-ccd", {
+      method: "POST",
+    });
+  },
+
+  checkDemoFlowSettlement(): Promise<DemoFlowScanResult> {
+    return requestJson<DemoFlowScanResult>("/api/demo-flow/check-settlement", {
+      method: "POST",
+    });
+  },
+
+  checkDemoFlowReturns(): Promise<DemoFlowScanResult> {
+    return requestJson<DemoFlowScanResult>("/api/demo-flow/check-returns", {
+      method: "POST",
+    });
+  },
+
+  getDemoFlowState(): Promise<DemoFlowState> {
+    return requestJson<DemoFlowState>("/api/demo-flow/state");
+  },
+
+  resetDemoFlow(): Promise<void> {
+    return requestNoContent("/api/demo-flow/reset", { method: "POST" });
   },
 };
 
