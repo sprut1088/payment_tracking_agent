@@ -9,11 +9,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 
 from payment_tracking_agent.agents.ai_explanation import (
     AIExplanationCallError,
     AIExplanationConfigError,
     AIExplanationService,
+    DEFAULT_PRESET,
+    ExplanationPreset,
     get_ai_explanation_service,
 )
 from payment_tracking_agent.ledger.store import PaymentLedger, get_payment_ledger
@@ -34,6 +37,12 @@ from payment_tracking_agent.simulator.scenario_state import (
 )
 
 router = APIRouter(prefix="/api/demo-flow", tags=["demo-flow"])
+
+
+class AIExplanationRequest(BaseModel):
+    """Optional body for the AI explanation endpoint (Prompt 17)."""
+
+    preset: ExplanationPreset = Field(default=DEFAULT_PRESET)
 
 
 @router.get("/config", response_model=DemoFlowConfigView)
@@ -97,12 +106,14 @@ def reset(
     response_model=AIExplanationResponse,
     responses={
         404: {"description": "Payment not found in the ledger."},
+        422: {"description": "Invalid preset."},
         502: {"description": "AI provider call failed."},
         503: {"description": "AI provider is not configured."},
     },
 )
 def generate_ai_explanation(
     payment_id: str,
+    request: AIExplanationRequest | None = None,
     ledger: PaymentLedger = Depends(get_payment_ledger),
     ai_service: AIExplanationService = Depends(get_ai_explanation_service),
 ) -> AIExplanationResponse:
@@ -111,7 +122,11 @@ def generate_ai_explanation(
     The AI never determines or changes payment status. This endpoint is
     read-only against the ledger: the ledger snapshot is fed to Claude and
     the response is returned as-is to the caller.
+
+    An optional request body may specify an explanation ``preset``:
+    ``operations`` (default), ``customer_safe``, or ``executive``.
     """
+    preset = request.preset if request is not None else DEFAULT_PRESET
     payment = ledger.get_payment(payment_id)
     if payment is None:
         raise HTTPException(
@@ -127,7 +142,7 @@ def generate_ai_explanation(
             ),
         )
     try:
-        return ai_service.explain(payment)
+        return ai_service.explain(payment, preset=preset)
     except AIExplanationConfigError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

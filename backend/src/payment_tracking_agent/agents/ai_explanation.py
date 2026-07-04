@@ -1,9 +1,9 @@
-"""Anthropic Claude AI explanation service (Prompt 16).
+"""Anthropic Claude AI explanation service (Prompt 16 / Prompt 17).
 
 The service is evidence-grounded: it only explains deterministic ledger data
 supplied to it. It never changes payment status, status history, or
-evidence. Callers pass in a ``Payment`` snapshot and receive a typed
-``AIExplanationResponse``.
+evidence. Callers pass in a ``Payment`` snapshot and an optional
+explanation ``preset`` and receive a typed ``AIExplanationResponse``.
 
 Testable design:
 - The Anthropic client can be injected via the ``client`` constructor
@@ -18,6 +18,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 
 from payment_tracking_agent.models.ai_explanation import AIExplanationResponse
@@ -25,9 +26,106 @@ from payment_tracking_agent.models.ledger import Payment
 
 DEFAULT_MODEL = "claude-3-5-sonnet-latest"
 
+
+class ExplanationPreset(str, Enum):
+    """Explanation style preset (Prompt 17)."""
+
+    OPERATIONS = "operations"
+    CUSTOMER_SAFE = "customer_safe"
+    EXECUTIVE = "executive"
+
+
+DEFAULT_PRESET = ExplanationPreset.OPERATIONS
+
+
+_STATUS_GUIDANCE: dict[str, str] = {
+    "WITH BENEFICIARY BANK": (
+        "Status guidance for WITH BENEFICIARY BANK:\n"
+        "- The CCD file passed bank-side syntax validation.\n"
+        "- Settlement summary evidence was received for the batch.\n"
+        "- The payment is currently treated as with the beneficiary bank.\n"
+        "- Settlement summary is summary-level evidence only.\n"
+        "- No payment-level clearing is claimed.\n"
+        "- No NACHA return evidence has been matched for this payment.\n"
+        "- Do not say 'cleared', 'settled at payment level', 'completed', "
+        "'successfully paid', 'funds transferred', or 'funds credited'."
+    ),
+    "REJECTED BY SCHEME": (
+        "Status guidance for REJECTED BY SCHEME:\n"
+        "- The CCD file passed bank-side syntax validation.\n"
+        "- A scheme-reject file matched this payment trace.\n"
+        "- The payment was rejected at scheme validation.\n"
+        "- The payment should be corrected and resubmitted in a new batch.\n"
+        "- Do not infer a root cause beyond the exact reason in evidence.\n"
+        "- Do not invent that a routing number is non-existent, an account "
+        "is closed, or that the beneficiary bank rejected it.\n"
+        "- Do not claim funds were or were not debited."
+    ),
+    "REJECTED BY BENEFICIARY BANK": (
+        "Status guidance for REJECTED BY BENEFICIARY BANK:\n"
+        "- The CCD file passed bank-side syntax validation.\n"
+        "- Settlement summary evidence was received for the batch.\n"
+        "- A NACHA return file later matched the original trace number.\n"
+        "- The payment is rejected by the beneficiary bank.\n"
+        "- The return reason code should drive the next action.\n"
+        "- Do not overwrite or contradict scheme-reject evidence."
+    ),
+    "SENT TO SCHEME": (
+        "Status guidance for SENT TO SCHEME:\n"
+        "- The CCD file passed bank-side syntax validation.\n"
+        "- The payment has been submitted to the scheme.\n"
+        "- No downstream scheme, settlement, or return evidence has been "
+        "received yet.\n"
+        "- Do not claim clearing, settlement outcomes, or fund movement."
+    ),
+    "WITH BANK": (
+        "Status guidance for WITH BANK:\n"
+        "- The payment is currently with the bank.\n"
+        "- Either bank-side syntax validation failed or a scheme reject "
+        "requires bank correction, per the evidence.\n"
+        "- The payment must be corrected and resubmitted."
+    ),
+}
+
+
+_PRESET_GUIDANCE: dict[ExplanationPreset, str] = {
+    ExplanationPreset.OPERATIONS: (
+        "Explanation style: operations.\n"
+        "- Audience is a bank operations analyst.\n"
+        "- Use concise, professional ACH operations language.\n"
+        "- Cite the specific evidence artifacts that support the current "
+        "status.\n"
+        "- Recommended action should be a concrete operations next step."
+    ),
+    ExplanationPreset.CUSTOMER_SAFE: (
+        "Explanation style: customer_safe.\n"
+        "- Audience is a bank customer, not an internal analyst.\n"
+        "- Avoid internal jargon unless strictly necessary.\n"
+        "- Do not use ACH file record codes or NACHA return codes as raw "
+        "identifiers; describe them in plain language.\n"
+        "- Do not claim or deny money movement.\n"
+        "- Customer-safe message must be polite and non-alarming."
+    ),
+    ExplanationPreset.EXECUTIVE: (
+        "Explanation style: executive.\n"
+        "- Audience is a bank executive.\n"
+        "- Keep the summary very short: current state, key evidence, and "
+        "next step.\n"
+        "- Prefer one to two sentences per field.\n"
+        "- Do not include per-record technical detail."
+    ),
+}
+
+
 SYSTEM_PROMPT = (
     "You are an ACH payment operations explanation assistant.\n"
     "You must only explain the deterministic evidence provided.\n"
+    "Use the current_status field as the source of truth.\n"
+    "Do not infer statuses from timestamps.\n"
+    "Do not infer money movement.\n"
+    "Do not infer customer risk history.\n"
+    "Do not infer settlement amount reconciliation.\n"
+    "Do not infer payment-level clearing from settlement summary.\n"
     "You must not invent payment status.\n"
     "You must not invent clearing.\n"
     "You must not invent return reasons.\n"
@@ -38,6 +136,8 @@ SYSTEM_PROMPT = (
     "Forbidden wording rules:\n"
     "- Do not say a payment is 'cleared', 'has cleared', 'was cleared', "
     "'were cleared', 'have cleared', 'payment cleared', or 'payments cleared'.\n"
+    "- Do not say a payment is 'successfully paid', 'payment completed', or "
+    "'settled at payment level'.\n"
     "- Do not use the word 'clearing' except in the specific caveat that "
     "settlement summary is NOT payment-level clearing evidence.\n"
     "- For CCD evidence, say 'bank-side syntax validation passed'. Do not say "
@@ -48,16 +148,11 @@ SYSTEM_PROMPT = (
     "credited' or similar sentences.\n"
     "- Customer-safe messages must not claim or deny fund movement unless the "
     "deterministic evidence explicitly says so.\n"
+    "- Do not include overly precise timing claims such as 'approximately N "
+    "seconds after submission'. Use qualitative wording such as 'after CCD "
+    "upload', 'later in the flow', 'after scheme-reject evidence was "
+    "received', or 'after NACHA return evidence was received'.\n"
     "\n"
-    "Status guidance:\n"
-    "If current_status is WITH BENEFICIARY BANK, say no return evidence has "
-    "been matched yet unless evidence says otherwise, and repeat that "
-    "settlement summary is summary-level evidence only.\n"
-    "If current_status is REJECTED BY SCHEME, explain that the payment was "
-    "rejected before beneficiary-bank processing.\n"
-    "If current_status is REJECTED BY BENEFICIARY BANK, explain that a NACHA "
-    "return matched the original trace.\n"
-    "Use concise, operations-friendly language.\n"
     "Return valid JSON only with keys: summary, status_explanation, "
     "evidence_used, limitations, recommended_action, customer_safe_message."
 )
@@ -172,35 +267,81 @@ class AIExplanationService:
         self._client = Anthropic(api_key=self._api_key)
         return self._client
 
-    def build_user_prompt(self, payment: Payment) -> str:
-        payload = {
-            "payment_id": payment.payment_id,
-            "batch_key": payment.batch_key,
-            "source_file": payment.source_file,
-            "trace_number": payment.trace_number,
-            "amount_cents": payment.amount_cents,
-            "individual_id_number": payment.individual_id_number,
-            "individual_name": payment.individual_name,
+    def build_system_prompt(
+        self, payment: Payment, preset: ExplanationPreset = DEFAULT_PRESET
+    ) -> str:
+        """Compose the base guardrails with status- and preset-specific text."""
+        status_value = payment.current_status.value
+        parts = [SYSTEM_PROMPT]
+        status_guidance = _STATUS_GUIDANCE.get(status_value)
+        if status_guidance:
+            parts.append(status_guidance)
+        parts.append(_PRESET_GUIDANCE[preset])
+        return "\n\n".join(parts)
+
+    def build_user_prompt(
+        self, payment: Payment, preset: ExplanationPreset = DEFAULT_PRESET
+    ) -> str:
+        """Assemble the compact evidence packet the prompt spec calls for."""
+        status_history = [h.model_dump(mode="json") for h in payment.status_history]
+        evidence = [e.model_dump(mode="json") for e in payment.evidence]
+        packet: dict[str, Any] = {
             "current_status": payment.current_status.value,
-            "status_history": [h.model_dump(mode="json") for h in payment.status_history],
-            "evidence": [e.model_dump(mode="json") for e in payment.evidence],
+            "payment_identity": {
+                "payment_id": payment.payment_id,
+                "individual_id_number": payment.individual_id_number,
+                "individual_name": payment.individual_name,
+                "receiving_dfi_identification": payment.receiving_dfi_identification,
+                "masked_account_number": payment.masked_account_number,
+            },
+            "amount_cents": payment.amount_cents,
+            "batch": {
+                "batch_key": payment.batch_key,
+                "source_file": payment.source_file,
+            },
+            "trace_number": payment.trace_number,
+            "status_history_chronological": status_history,
+            "evidence_chronological": evidence,
+            "known_limitations": [
+                "Settlement summary is summary-level evidence only.",
+                "No payment-level clearing is claimed from settlement summary.",
+                "Return files may arrive in later cycles and are not guaranteed to arrive.",
+            ],
+            "allowed_conclusions": [
+                "Restate the current_status.",
+                "Describe the evidence that supports the current_status.",
+                "Recommend an operations next step consistent with the evidence.",
+            ],
+            "forbidden_conclusions": [
+                "Do not infer payment-level clearing from settlement summary.",
+                "Do not infer money movement.",
+                "Do not infer customer risk history from a single payment.",
+                "Do not infer settlement amount reconciliation.",
+                "Do not infer statuses from timestamps.",
+            ],
+            "explanation_preset": preset.value,
         }
         return (
             "Explain this ACH payment based only on the deterministic evidence "
-            "provided. Return valid JSON only with keys: summary, "
+            "packet below. Return valid JSON only with keys: summary, "
             "status_explanation, evidence_used, limitations, "
             "recommended_action, customer_safe_message.\n\n"
-            f"Payment: {json.dumps(payload, default=str)}"
+            f"Evidence packet: {json.dumps(packet, default=str)}"
         )
 
-    def explain(self, payment: Payment) -> AIExplanationResponse:
+    def explain(
+        self,
+        payment: Payment,
+        preset: ExplanationPreset = DEFAULT_PRESET,
+    ) -> AIExplanationResponse:
         client = self._get_client()
-        user_prompt = self.build_user_prompt(payment)
+        system_prompt = self.build_system_prompt(payment, preset)
+        user_prompt = self.build_user_prompt(payment, preset)
         try:
             message = client.messages.create(
                 model=self._model,
                 max_tokens=1024,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
         except AIExplanationConfigError:
@@ -312,10 +453,32 @@ _CLEARED_REPLACEMENTS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 _UNSUPPORTED_FUNDS_REGEX = re.compile(
-    r"\b(?:no\s+)?funds?\s+(?:have\s+been|were|are|has\s+been|is)\s+"
+    r"\b(?:no\s+)?funds?\s+"
+    r"(?:have\s+been\s+|has\s+been\s+|were\s+|was\s+|are\s+|is\s+|being\s+|"
+    r"successfully\s+)?"
     r"(?:debited|credited|transferred|moved)\b",
     re.IGNORECASE,
 )
+
+_UNSUPPORTED_OUTCOME_REGEX = re.compile(
+    r"\b(?:"
+    r"successfully\s+paid|"
+    r"payment[s]?\s+completed|"
+    r"payment[s]?\s+successfully\s+completed|"
+    r"settled\s+at\s+payment\s+level|"
+    r"settlement\s+is\s+complete"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_TIMING_CLAIM_REGEX = re.compile(
+    r"\b(?:approximately|roughly|about|around)\s+\d+(?:\.\d+)?\s+"
+    r"(?:second|sec|minute|min|hour|hr|day)s?\b"
+    r"(?:\s+(?:after|before|since|following)\s+\S+(?:\s+\S+)?)?",
+    re.IGNORECASE,
+)
+
+_TIMING_SAFE_PHRASE = "later in the flow"
 
 _SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+")
 
@@ -355,8 +518,9 @@ def _sanitize_ai_text(text: str, status_value: str) -> str:
     """Scrub unsafe AI wording before it leaves the backend.
 
     - Rewrites "cleared"/"clearing" verbs into ACH-safe language.
-    - Replaces sentences that make unsupported fund-movement claims with a
-      status-aware safe sentence.
+    - Rewrites overly precise timing claims into qualitative wording.
+    - Replaces sentences that make unsupported fund-movement or completion
+      claims with a status-aware safe sentence.
 
     Never mutates the payment ledger.
     """
@@ -366,13 +530,19 @@ def _sanitize_ai_text(text: str, status_value: str) -> str:
     for pattern, replacement in _CLEARED_REPLACEMENTS:
         result = pattern.sub(replacement, result)
 
-    if _UNSUPPORTED_FUNDS_REGEX.search(result):
+    result = _TIMING_CLAIM_REGEX.sub(_TIMING_SAFE_PHRASE, result)
+
+    if _UNSUPPORTED_FUNDS_REGEX.search(result) or _UNSUPPORTED_OUTCOME_REGEX.search(
+        result
+    ):
         safe_sentence = _safe_status_sentence(status_value)
         sentences = _SENTENCE_SPLIT_REGEX.split(result)
         rewritten: list[str] = []
         replaced = False
         for sentence in sentences:
-            if _UNSUPPORTED_FUNDS_REGEX.search(sentence):
+            if _UNSUPPORTED_FUNDS_REGEX.search(
+                sentence
+            ) or _UNSUPPORTED_OUTCOME_REGEX.search(sentence):
                 if not replaced:
                     rewritten.append(safe_sentence)
                     replaced = True

@@ -7,6 +7,7 @@ via FastAPI dependency overrides.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,10 +15,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from payment_tracking_agent.agents.ai_explanation import (
+    DEFAULT_PRESET,
     SYSTEM_PROMPT,
     AIExplanationCallError,
     AIExplanationConfigError,
     AIExplanationService,
+    ExplanationPreset,
     _reset_system_certs_injected_for_tests,
     _sanitize_ai_text,
     get_ai_explanation_service,
@@ -140,9 +143,6 @@ def _clean_state() -> None:
 
 def test_system_prompt_contains_required_guardrails() -> None:
     assert "Settlement summary is summary-level evidence only." in SYSTEM_PROMPT
-    assert "WITH BENEFICIARY BANK" in SYSTEM_PROMPT
-    assert "REJECTED BY SCHEME" in SYSTEM_PROMPT
-    assert "REJECTED BY BENEFICIARY BANK" in SYSTEM_PROMPT
     assert "You must not invent payment status." in SYSTEM_PROMPT
     # Prompt 16 correction: explicit forbidden-wording rules.
     assert "Forbidden wording rules" in SYSTEM_PROMPT
@@ -150,6 +150,77 @@ def test_system_prompt_contains_required_guardrails() -> None:
     assert "bank-side syntax validation passed" in SYSTEM_PROMPT
     assert "'clearing'" in SYSTEM_PROMPT
     assert "debited" in SYSTEM_PROMPT and "transferred" in SYSTEM_PROMPT
+    # Prompt 17: broadened forbidden outcomes and timing wording.
+    assert "successfully paid" in SYSTEM_PROMPT
+    assert "payment completed" in SYSTEM_PROMPT.lower() or "'payment completed'" in SYSTEM_PROMPT.lower()
+    assert "approximately" in SYSTEM_PROMPT
+    # Prompt 17: source-of-truth guidance.
+    assert "current_status" in SYSTEM_PROMPT
+    assert "Do not infer money movement." in SYSTEM_PROMPT
+    assert "Do not infer payment-level clearing from settlement summary." in SYSTEM_PROMPT
+
+
+def test_composed_system_prompt_includes_status_and_preset_guidance() -> None:
+    service = AIExplanationService(
+        api_key="unused",
+        model="claude-test",
+        client=FakeAnthropicClient(CANNED_JSON),
+    )
+
+    beneficiary_payment = _make_payment_with_status(PaymentStatus.WITH_BENEFICIARY_BANK)
+    scheme_payment = _make_payment_with_status(PaymentStatus.REJECTED_BY_SCHEME)
+    return_payment = _make_payment_with_status(PaymentStatus.REJECTED_BY_BENEFICIARY_BANK)
+
+    ben_prompt = service.build_system_prompt(beneficiary_payment)
+    scheme_prompt = service.build_system_prompt(scheme_payment)
+    return_prompt = service.build_system_prompt(return_payment)
+
+    assert "WITH BENEFICIARY BANK" in ben_prompt
+    assert "No payment-level clearing is claimed" in ben_prompt
+    assert "NACHA return evidence has been matched" in ben_prompt
+
+    assert "REJECTED BY SCHEME" in scheme_prompt
+    assert "scheme-reject file matched" in scheme_prompt
+    assert "corrected and resubmitted" in scheme_prompt
+
+    assert "REJECTED BY BENEFICIARY BANK" in return_prompt
+    assert "NACHA return file later matched" in return_prompt
+
+    # Preset guidance defaults to operations.
+    assert "Explanation style: operations." in ben_prompt
+
+    customer_prompt = service.build_system_prompt(
+        beneficiary_payment, ExplanationPreset.CUSTOMER_SAFE
+    )
+    exec_prompt = service.build_system_prompt(
+        beneficiary_payment, ExplanationPreset.EXECUTIVE
+    )
+    assert "Explanation style: customer_safe." in customer_prompt
+    assert "Explanation style: executive." in exec_prompt
+
+
+def test_user_prompt_contains_source_of_truth_guardrails() -> None:
+    service = AIExplanationService(
+        api_key="unused",
+        model="claude-test",
+        client=FakeAnthropicClient(CANNED_JSON),
+    )
+    payment = _make_payment()
+
+    user_prompt = service.build_user_prompt(payment)
+
+    assert "current_status" in user_prompt
+    assert "Do not infer money movement." in user_prompt
+    assert "Do not infer payment-level clearing from settlement summary." in user_prompt
+    assert "known_limitations" in user_prompt
+    assert "allowed_conclusions" in user_prompt
+    assert "forbidden_conclusions" in user_prompt
+
+
+def _make_payment_with_status(status: PaymentStatus) -> Payment:
+    payment = _make_payment(payment_id=f"batch:{status.value.replace(' ', '_')}")
+    payment.current_status = status
+    return payment
 
 
 def test_is_configured_false_without_api_key_or_client() -> None:
@@ -557,3 +628,207 @@ def test_endpoint_scrub_uses_beneficiary_safe_sentence_for_settlement_status() -
     body = resp.json()
     assert "summary-level evidence only" in body["status_explanation"].lower()
     assert "cleared" not in body["customer_safe_message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Prompt 17: presets + timing + completion-claim sanitization
+# ---------------------------------------------------------------------------
+
+
+def test_default_preset_is_operations() -> None:
+    assert DEFAULT_PRESET is ExplanationPreset.OPERATIONS
+
+
+def test_endpoint_defaults_to_operations_when_no_body() -> None:
+    payment = _make_payment()
+    get_payment_ledger().add_payments([payment])
+    fake_client = FakeAnthropicClient(CANNED_JSON)
+    service = AIExplanationService(
+        api_key="unused", model="claude-test", client=fake_client
+    )
+    app.dependency_overrides[get_ai_explanation_service] = lambda: service
+
+    with TestClient(app) as client:
+        resp = client.post(f"/api/demo-flow/payments/{payment.payment_id}/ai-explanation")
+
+    assert resp.status_code == 200
+    assert "Explanation style: operations." in fake_client.capture["system"]
+    assert '"explanation_preset": "operations"' in fake_client.capture["messages"][0]["content"]
+
+
+@pytest.mark.parametrize(
+    "preset_value,expected_marker",
+    [
+        ("operations", "Explanation style: operations."),
+        ("customer_safe", "Explanation style: customer_safe."),
+        ("executive", "Explanation style: executive."),
+    ],
+)
+def test_endpoint_accepts_valid_presets(preset_value: str, expected_marker: str) -> None:
+    payment = _make_payment()
+    get_payment_ledger().add_payments([payment])
+    fake_client = FakeAnthropicClient(CANNED_JSON)
+    service = AIExplanationService(
+        api_key="unused", model="claude-test", client=fake_client
+    )
+    app.dependency_overrides[get_ai_explanation_service] = lambda: service
+
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/demo-flow/payments/{payment.payment_id}/ai-explanation",
+            json={"preset": preset_value},
+        )
+
+    assert resp.status_code == 200
+    assert expected_marker in fake_client.capture["system"]
+    assert f'"explanation_preset": "{preset_value}"' in fake_client.capture["messages"][0]["content"]
+
+
+def test_endpoint_rejects_invalid_preset() -> None:
+    payment = _make_payment()
+    get_payment_ledger().add_payments([payment])
+    service = AIExplanationService(
+        api_key="unused",
+        model="claude-test",
+        client=FakeAnthropicClient(CANNED_JSON),
+    )
+    app.dependency_overrides[get_ai_explanation_service] = lambda: service
+
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/api/demo-flow/payments/{payment.payment_id}/ai-explanation",
+            json={"preset": "not-a-real-preset"},
+        )
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert "preset" in json.dumps(body).lower()
+
+
+def test_sanitizer_rewrites_precise_timing_claims() -> None:
+    cleaned = _sanitize_ai_text(
+        "The scheme rejected the payment approximately 41 seconds after submission.",
+        "REJECTED BY SCHEME",
+    )
+    assert "approximately 41 seconds" not in cleaned.lower()
+    assert "later in the flow" in cleaned.lower()
+
+
+def test_sanitizer_rewrites_short_timing_claim() -> None:
+    cleaned = _sanitize_ai_text(
+        "Return arrived approximately 2 seconds after settlement.",
+        "REJECTED BY BENEFICIARY BANK",
+    )
+    assert "approximately 2 seconds" not in cleaned.lower()
+    assert "later in the flow" in cleaned.lower()
+
+
+def test_sanitizer_replaces_completion_claims() -> None:
+    cleaned = _sanitize_ai_text(
+        "The payment was successfully paid. Everything is fine.",
+        "WITH BENEFICIARY BANK",
+    )
+    assert "successfully paid" not in cleaned.lower()
+    assert "summary-level evidence only" in cleaned.lower()
+
+    cleaned2 = _sanitize_ai_text(
+        "Payment completed on the beneficiary side.",
+        "WITH BENEFICIARY BANK",
+    )
+    assert "payment completed" not in cleaned2.lower()
+    assert "summary-level evidence only" in cleaned2.lower()
+
+
+def test_sanitizer_replaces_bare_funds_credited_and_transferred() -> None:
+    cleaned_credit = _sanitize_ai_text(
+        "The funds credited to the beneficiary account.",
+        "WITH BENEFICIARY BANK",
+    )
+    assert "funds credited" not in cleaned_credit.lower()
+
+    cleaned_transfer = _sanitize_ai_text(
+        "Funds transferred to the destination bank.",
+        "WITH BENEFICIARY BANK",
+    )
+    assert "funds transferred" not in cleaned_transfer.lower()
+
+
+def test_sanitizer_preserves_required_caveat() -> None:
+    caveat = (
+        "Settlement summary is not payment-level clearing evidence. "
+        "The payment progressed to the beneficiary bank."
+    )
+    cleaned = _sanitize_ai_text(caveat, "WITH BENEFICIARY BANK")
+    assert "settlement summary is not payment-level clearing evidence" in cleaned.lower()
+
+
+def test_endpoint_scrubs_unsafe_timing_and_completion_claims() -> None:
+    payment = _make_payment()
+    get_payment_ledger().add_payments([payment])
+    unsafe_json = (
+        '{"summary":"Payment was successfully paid approximately 41 seconds after submission.",'
+        '"status_explanation":"Payment completed at beneficiary bank.",'
+        '"evidence_used":["CCD upload","Settlement summary"],'
+        '"limitations":["Funds credited to beneficiary account."],'
+        '"recommended_action":"None. Funds transferred already.",'
+        '"customer_safe_message":"Your payment was successfully paid."}'
+    )
+    service = AIExplanationService(
+        api_key="unused",
+        model="claude-test",
+        client=FakeAnthropicClient(unsafe_json),
+    )
+    app.dependency_overrides[get_ai_explanation_service] = lambda: service
+
+    with TestClient(app) as client:
+        resp = client.post(f"/api/demo-flow/payments/{payment.payment_id}/ai-explanation")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    joined = json.dumps(body).lower()
+    for bad in [
+        "approximately 41 seconds",
+        "approximately 2 seconds",
+        "successfully paid",
+        "payment completed",
+        "funds credited",
+        "funds transferred",
+    ]:
+        assert bad not in joined, f"Unsafe phrase leaked: {bad!r} in {joined!r}"
+
+    # Ledger untouched.
+    after = get_payment_ledger().get_payment(payment.payment_id)
+    assert after is not None
+    assert after.current_status == payment.current_status
+    assert after.status_history == payment.status_history
+    assert after.evidence == payment.evidence
+
+
+def test_ai_explanation_endpoint_does_not_mutate_ledger_across_presets() -> None:
+    payment = _make_payment()
+    ledger = get_payment_ledger()
+    ledger.add_payments([payment])
+    before_status = payment.current_status
+    before_history = list(payment.status_history)
+    before_evidence = list(payment.evidence)
+
+    service = AIExplanationService(
+        api_key="unused",
+        model="claude-test",
+        client=FakeAnthropicClient(CANNED_JSON),
+    )
+    app.dependency_overrides[get_ai_explanation_service] = lambda: service
+
+    with TestClient(app) as client:
+        for preset_value in ("operations", "customer_safe", "executive"):
+            resp = client.post(
+                f"/api/demo-flow/payments/{payment.payment_id}/ai-explanation",
+                json={"preset": preset_value},
+            )
+            assert resp.status_code == 200
+
+    after = ledger.get_payment(payment.payment_id)
+    assert after is not None
+    assert after.current_status == before_status
+    assert after.status_history == before_history
+    assert after.evidence == before_evidence

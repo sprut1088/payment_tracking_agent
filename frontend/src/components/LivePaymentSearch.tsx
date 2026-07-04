@@ -8,6 +8,7 @@ import {
 } from "../api/ledger";
 import type {
   AIExplanationResponse,
+  ExplanationPreset,
   LedgerPayment,
   PaymentLedgerView,
 } from "../types/api";
@@ -153,12 +154,13 @@ function AiExplanationPanel({ payment }: AiExplanationPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<AIExplanationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preset, setPreset] = useState<ExplanationPreset>("operations");
 
   const onGenerate = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.generateAiExplanation(payment.payment_id);
+      const response = await api.generateAiExplanation(payment.payment_id, preset);
       setResult(response);
     } catch (err: unknown) {
       const message =
@@ -170,7 +172,13 @@ function AiExplanationPanel({ payment }: AiExplanationPanelProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [payment.payment_id]);
+  }, [payment.payment_id, preset]);
+
+  const presetOptions: { value: ExplanationPreset; label: string }[] = [
+    { value: "operations", label: "Operations" },
+    { value: "customer_safe", label: "Customer-safe" },
+    { value: "executive", label: "Executive" },
+  ];
 
   return (
     <section className="live-detail__section ai-panel">
@@ -180,6 +188,35 @@ function AiExplanationPanel({ payment }: AiExplanationPanelProps) {
           Claude explains the deterministic evidence on demand. Claude does
           not determine payment status.
         </p>
+        <p className="ai-panel__helper">
+          Claude explains deterministic ledger evidence. It does not determine
+          payment status.
+        </p>
+      </div>
+      <div
+        className="ai-panel__presets"
+        role="radiogroup"
+        aria-label="Explanation style"
+      >
+        {presetOptions.map((opt) => {
+          const active = preset === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={
+                "ai-panel__preset-button" +
+                (active ? " ai-panel__preset-button--active" : "")
+              }
+              onClick={() => setPreset(opt.value)}
+              disabled={isLoading}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
       <div className="ai-panel__controls">
         <button

@@ -487,3 +487,13 @@ Notes:
 - The AI is on-demand only. It runs when the user clicks the button in Payment Search and never during batch, scheme, settlement, or return processing.
 - The AI does not determine payment status. The ledger is authoritative. The explanation is displayed alongside the deterministic status and evidence.
 
+### AI explanation styles
+
+Payment Search offers three explanation presets alongside the `Generate AI explanation` button. The preset is passed to the backend as `{ "preset": "..." }` in the POST body.
+
+- `operations` — evidence-based operations explanation and recommended action. This is the default.
+- `customer_safe` — customer-facing wording without unsupported money-movement or clearing claims.
+- `executive` — short status, evidence, and next-step summary.
+
+AI explanations are generated on demand only. Claude does not determine payment status. Preset selection changes only Claude's tone and audience, never the deterministic ledger status or evidence.
+

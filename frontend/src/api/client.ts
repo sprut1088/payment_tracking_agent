@@ -12,6 +12,7 @@ import type {
   DemoFlowState,
   DashboardResponse,
   EvidenceRef,
+  ExplanationPreset,
   PaymentLedgerView,
   PaymentRecord,
   Scenario,
@@ -586,10 +587,17 @@ export const api = {
     return requestJson<PaymentLedgerView>("/api/demo-flow/payments");
   },
 
-  generateAiExplanation(paymentId: string): Promise<AIExplanationResponse> {
+  generateAiExplanation(
+    paymentId: string,
+    preset: ExplanationPreset = "operations",
+  ): Promise<AIExplanationResponse> {
     return requestJson<AIExplanationResponse>(
       `/api/demo-flow/payments/${encodeURIComponent(paymentId)}/ai-explanation`,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset }),
+      },
     );
   },
 

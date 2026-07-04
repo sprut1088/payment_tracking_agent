@@ -271,3 +271,5 @@ export interface AIExplanationResponse {
   customer_safe_message: string;
   generated_at: string;
 }
+
+export type ExplanationPreset = "operations" | "customer_safe" | "executive";
