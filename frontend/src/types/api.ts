@@ -258,3 +258,16 @@ export interface PaymentLedgerView {
   as_of: string;
   payments: LedgerPayment[];
 }
+
+export interface AIExplanationResponse {
+  payment_id: string;
+  provider: string;
+  model: string;
+  summary: string;
+  status_explanation: string;
+  evidence_used: string[];
+  limitations: string[];
+  recommended_action: string;
+  customer_safe_message: string;
+  generated_at: string;
+}

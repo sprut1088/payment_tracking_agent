@@ -456,3 +456,34 @@ Settlement summary should move payments to:
 `WITH BENEFICIARY BANK`
 
 Only explicit item-level evidence or return evidence should update individual payment outcomes beyond that stage.
+
+---
+
+## Anthropic Claude AI Explanation Setup
+
+Payment Search exposes a `Generate AI explanation` button on any live-ledger payment. The button calls `POST /api/demo-flow/payments/{payment_id}/ai-explanation`, which forwards a ledger snapshot to Anthropic Claude and returns a structured, evidence-grounded explanation. Claude never determines or updates payment status.
+
+Configure the backend before starting `uvicorn`:
+
+```powershell
+$env:ANTHROPIC_API_KEY = "your-key-here"
+$env:ANTHROPIC_MODEL   = "your-claude-model-id"
+$env:PAYMENT_AGENT_USE_SYSTEM_CERTS = "true"
+```
+
+Then start the backend as usual:
+
+```powershell
+cd backend
+python -m uvicorn payment_tracking_agent.main:app --reload --port 8000
+```
+
+Notes:
+
+- `ANTHROPIC_MODEL` is optional. A safe default (`claude-3-5-sonnet-latest`) is used when unset.
+- `PAYMENT_AGENT_USE_SYSTEM_CERTS` is optional. When set to `true` (or `1` / `yes` / `on`), the backend calls `truststore.inject_into_ssl()` before creating the Anthropic client, so Python's `ssl` module trusts the operating system certificate store. This is useful on corporate Windows machines where custom root CAs are only trusted by the OS certificate store. SSL verification is never disabled.
+- Never commit API keys. Set the environment variables in your shell only.
+- If `ANTHROPIC_API_KEY` is unset, the endpoint returns HTTP 503 and the UI shows: `Claude AI explanation is not configured. Set ANTHROPIC_API_KEY and restart the backend.`
+- The AI is on-demand only. It runs when the user clicks the button in Payment Search and never during batch, scheme, settlement, or return processing.
+- The AI does not determine payment status. The ledger is authoritative. The explanation is displayed alongside the deterministic status and evidence.
+

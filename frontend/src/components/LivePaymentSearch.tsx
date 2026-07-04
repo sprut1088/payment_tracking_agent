@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
 import {
   fetchLiveLedger,
   formatDollars,
   formatTimestamp,
   latestEvidenceSummary,
 } from "../api/ledger";
-import type { LedgerPayment, PaymentLedgerView } from "../types/api";
+import type {
+  AIExplanationResponse,
+  LedgerPayment,
+  PaymentLedgerView,
+} from "../types/api";
 import { StatusBadge } from "./StatusBadge";
 
 const EMPTY_STATE_MESSAGE =
@@ -134,6 +139,120 @@ function LivePaymentDetail({ payment, onClose }: LiveDetailProps) {
           clearing is claimed from settlement summary.
         </p>
       </section>
+
+      <AiExplanationPanel key={payment.payment_id} payment={payment} />
+    </section>
+  );
+}
+
+interface AiExplanationPanelProps {
+  payment: LedgerPayment;
+}
+
+function AiExplanationPanel({ payment }: AiExplanationPanelProps) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [result, setResult] = useState<AIExplanationResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const onGenerate = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await api.generateAiExplanation(payment.payment_id);
+      setResult(response);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to generate AI explanation.";
+      setError(message);
+      setResult(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [payment.payment_id]);
+
+  return (
+    <section className="live-detail__section ai-panel">
+      <div className="ai-panel__header">
+        <h4 className="live-detail__section-title">AI explanation</h4>
+        <p className="ai-panel__subtitle">
+          Claude explains the deterministic evidence on demand. Claude does
+          not determine payment status.
+        </p>
+      </div>
+      <div className="ai-panel__controls">
+        <button
+          type="button"
+          className="button"
+          onClick={onGenerate}
+          disabled={isLoading}
+        >
+          {isLoading ? "Generating Claude explanation..." : "Generate AI explanation"}
+        </button>
+        {result && (
+          <span className="ai-panel__meta">
+            Provider {result.provider} · Model{" "}
+            <span className="table__mono">{result.model}</span> · Generated{" "}
+            {formatTimestamp(result.generated_at)}
+          </span>
+        )}
+      </div>
+
+      {error && (
+        <p className="ai-panel__error" role="alert">
+          {error}
+        </p>
+      )}
+
+      {result && !error && (
+        <div className="ai-panel__result">
+          <div className="ai-panel__field">
+            <span className="ai-panel__label">Summary</span>
+            <p>{result.summary || "(No summary returned.)"}</p>
+          </div>
+          <div className="ai-panel__field">
+            <span className="ai-panel__label">Status explanation</span>
+            <p>{result.status_explanation || "(No status explanation returned.)"}</p>
+          </div>
+          <div className="ai-panel__field">
+            <span className="ai-panel__label">Evidence used</span>
+            {result.evidence_used.length === 0 ? (
+              <p className="live-detail__empty">
+                Claude did not list any evidence items.
+              </p>
+            ) : (
+              <ul className="ai-panel__list">
+                {result.evidence_used.map((item, idx) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="ai-panel__field">
+            <span className="ai-panel__label">Limitations</span>
+            {result.limitations.length === 0 ? (
+              <p className="live-detail__empty">
+                Claude did not list any limitations.
+              </p>
+            ) : (
+              <ul className="ai-panel__list">
+                {result.limitations.map((item, idx) => (
+                  <li key={idx}>{item}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="ai-panel__field">
+            <span className="ai-panel__label">Recommended action</span>
+            <p>{result.recommended_action || "(No recommended action returned.)"}</p>
+          </div>
+          <div className="ai-panel__field">
+            <span className="ai-panel__label">Customer-safe message</span>
+            <p>{result.customer_safe_message || "(No customer message returned.)"}</p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

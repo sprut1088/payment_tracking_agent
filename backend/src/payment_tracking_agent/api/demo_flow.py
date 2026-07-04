@@ -8,9 +8,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from payment_tracking_agent.agents.ai_explanation import (
+    AIExplanationCallError,
+    AIExplanationConfigError,
+    AIExplanationService,
+    get_ai_explanation_service,
+)
 from payment_tracking_agent.ledger.store import PaymentLedger, get_payment_ledger
+from payment_tracking_agent.models.ai_explanation import AIExplanationResponse
 from payment_tracking_agent.models.demo_flow import (
     DemoFlowConfigView,
     DemoFlowState,
@@ -83,3 +90,51 @@ def reset(
 ) -> None:
     store.reset()
     ledger.reset()
+
+
+@router.post(
+    "/payments/{payment_id}/ai-explanation",
+    response_model=AIExplanationResponse,
+    responses={
+        404: {"description": "Payment not found in the ledger."},
+        502: {"description": "AI provider call failed."},
+        503: {"description": "AI provider is not configured."},
+    },
+)
+def generate_ai_explanation(
+    payment_id: str,
+    ledger: PaymentLedger = Depends(get_payment_ledger),
+    ai_service: AIExplanationService = Depends(get_ai_explanation_service),
+) -> AIExplanationResponse:
+    """Return a Claude-generated explanation for the payment.
+
+    The AI never determines or changes payment status. This endpoint is
+    read-only against the ledger: the ledger snapshot is fed to Claude and
+    the response is returned as-is to the caller.
+    """
+    payment = ledger.get_payment(payment_id)
+    if payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Payment {payment_id} not found in the ledger.",
+        )
+    if not ai_service.is_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Claude AI explanation is not configured. "
+                "Set ANTHROPIC_API_KEY and restart the backend."
+            ),
+        )
+    try:
+        return ai_service.explain(payment)
+    except AIExplanationConfigError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except AIExplanationCallError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Anthropic Claude call failed: {exc}",
+        ) from exc

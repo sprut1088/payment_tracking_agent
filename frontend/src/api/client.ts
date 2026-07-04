@@ -4,6 +4,7 @@
 
 import type {
   AgentTraceStep,
+  AIExplanationResponse,
   BatchSummary,
   CustomerSummary,
   DemoFlowConfig,
@@ -583,6 +584,13 @@ export const api = {
 
   getDemoFlowPayments(): Promise<PaymentLedgerView> {
     return requestJson<PaymentLedgerView>("/api/demo-flow/payments");
+  },
+
+  generateAiExplanation(paymentId: string): Promise<AIExplanationResponse> {
+    return requestJson<AIExplanationResponse>(
+      `/api/demo-flow/payments/${encodeURIComponent(paymentId)}/ai-explanation`,
+      { method: "POST" },
+    );
   },
 
   resetDemoFlow(): Promise<void> {
