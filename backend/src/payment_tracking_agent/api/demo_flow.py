@@ -272,6 +272,8 @@ def get_under_review(
     for under_review_ccd in scan_dirs:
         if not under_review_ccd.exists():
             continue
+
+        # Pass 1 — files that have a companion .corrections.json (full review flow)
         for corrections_file in sorted(under_review_ccd.glob("*.corrections.json")):
             stem = corrections_file.stem.replace(".corrections", "")
             if stem in seen:
@@ -301,6 +303,33 @@ def get_under_review(
                 corrected_file_content=corrections_data.get("corrected_file_content"),
                 corrected_lines=corrections_data.get("corrected_lines"),
             ))
+
+        # Pass 2 — original files WITHOUT a corrections JSON (no LLM run yet / pre-fix files)
+        ach_extensions = {".ach", ".txt", ".dat", ".ccd"}
+        for orig_file in sorted(under_review_ccd.iterdir()):
+            if orig_file.suffix.lower() not in ach_extensions:
+                continue
+            stem = orig_file.stem
+            if stem in seen:
+                continue
+            seen.add(stem)
+            try:
+                original_content = orig_file.read_text(encoding="ascii", errors="replace")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("under-review: could not read %s: %s", orig_file, exc)
+                continue
+            items.append(UnderReviewItem(
+                file_name=orig_file.name,
+                batch_id=stem,
+                discovered_at=datetime.fromtimestamp(
+                    orig_file.stat().st_mtime, tz=timezone.utc
+                ).isoformat(),
+                errors=["File has syntax errors. No auto-corrections available — re-drop the file to generate corrections."],
+                original_content=original_content,
+                corrected_file_content=None,
+                corrected_lines=None,
+            ))
+
     return items
 
 

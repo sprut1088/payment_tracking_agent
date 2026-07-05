@@ -266,6 +266,36 @@ export function computeFileRiskLevel(rows: PaymentRecord[]): import("../types/ap
   return "LOW";
 }
 
+/** Batch-level risk: derived from the batch's own rejection rate, not individual transaction risk. */
+export function computeBatchRiskLevel(rows: PaymentRecord[]): import("../types/api").RiskLevel {
+  if (rows.length === 0) return "LOW";
+  const rejected = rows.filter(
+    (r) =>
+      r.currentStatus === "REJECTED BY SCHEME" ||
+      r.currentStatus === "REJECTED BY BENEFICIARY BANK",
+  ).length;
+  const rate = (rejected / rows.length) * 100;
+  if (rate > 50) return "HIGH";
+  if (rejected > 0) return "MEDIUM";
+  return "LOW";
+}
+
+export function computeBatchRiskReason(rows: PaymentRecord[]): string {
+  if (rows.length === 0) return "No payments in batch.";
+  const rejectedByScheme = rows.filter((r) => r.currentStatus === "REJECTED BY SCHEME").length;
+  const rejectedByBeneficiary = rows.filter(
+    (r) => r.currentStatus === "REJECTED BY BENEFICIARY BANK",
+  ).length;
+  const rejected = rejectedByScheme + rejectedByBeneficiary;
+  const rate = (rejected / rows.length) * 100;
+  if (rejected === 0)
+    return `Batch rejection rate: 0% — all ${rows.length} payment${rows.length !== 1 ? "s" : ""} clean.`;
+  const parts = [`Batch rejection rate: ${rate.toFixed(1)}% (${rejected}/${rows.length} payments).`];
+  if (rejectedByScheme > 0) parts.push(`${rejectedByScheme} rejected by scheme.`);
+  if (rejectedByBeneficiary > 0) parts.push(`${rejectedByBeneficiary} rejected by beneficiary bank.`);
+  return parts.join(" ");
+}
+
 export function computeFileRiskReason(rows: PaymentRecord[]): string {
   const counts = { HIGH: 0, MEDIUM: 0, LOW: 0 } as Record<string, number>;
   for (const r of rows) counts[r.riskLevel] = (counts[r.riskLevel] ?? 0) + 1;
@@ -295,8 +325,8 @@ function summarizeBatch(batchId: string, cycleTime: string, sourceFile: string):
     withBeneficiaryBank: count("WITH BENEFICIARY BANK"),
     rejectedByScheme: count("REJECTED BY SCHEME"),
     rejectedByBeneficiaryBank: count("REJECTED BY BENEFICIARY BANK"),
-    fileRiskLevel: computeFileRiskLevel(rows),
-    fileRiskReason: computeFileRiskReason(rows),
+    fileRiskLevel: computeBatchRiskLevel(rows),
+    fileRiskReason: computeBatchRiskReason(rows),
     rejectedPercentage:
       rows.length > 0 ? Math.round((rejectedCount / rows.length) * 1000) / 10 : 0,
   };
@@ -687,8 +717,8 @@ function buildLiveBatchSummaries(payments: PaymentRecord[]): BatchSummary[] {
       withBeneficiaryBank: rows.filter((r) => r.currentStatus === "WITH BENEFICIARY BANK").length,
       rejectedByScheme,
       rejectedByBeneficiaryBank,
-      fileRiskLevel: computeFileRiskLevel(rows),
-      fileRiskReason: computeFileRiskReason(rows),
+      fileRiskLevel: computeBatchRiskLevel(rows),
+      fileRiskReason: computeBatchRiskReason(rows),
       rejectedPercentage:
         rows.length > 0 ? Math.round((rejectedCount / rows.length) * 1000) / 10 : 0,
     };

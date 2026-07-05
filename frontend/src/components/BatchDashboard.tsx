@@ -60,7 +60,7 @@ export function BatchDashboard({ onSelectPayment, demoMode, refreshKey }: BatchD
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demoMode, refreshKey]);
 
-  // Auto-refresh every 30 s in live mode so scheduler-driven status changes appear
+  // Auto-refresh every 10 s in live mode so scheduler-driven status changes appear
   // without requiring the user to navigate away and back.
   useEffect(() => {
     if (demoMode) return;
@@ -72,7 +72,7 @@ export function BatchDashboard({ onSelectPayment, demoMode, refreshKey }: BatchD
           setReviewItems(r);
         })
         .catch(() => undefined);
-    }, 30_000);
+    }, 10_000);
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demoMode]);

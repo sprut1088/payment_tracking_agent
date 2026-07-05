@@ -67,9 +67,10 @@ class Settings(BaseSettings):
     # Scheduler intervals (seconds)
     return_scan_interval_seconds: int = 30
     scheme_push_interval_seconds: int = 30
-    # How long after scheme push before payments auto-advance to WITH BENEFICIARY BANK.
-    # Set to 0 to disable the auto-simulation (use manual Check Settlement instead).
-    settlement_simulation_interval_seconds: int = 30
+    # Auto-simulation disabled by default — payments only advance to WITH BENEFICIARY BANK
+    # when an actual settlement file is received (via Check Settlement or drop/settlement/input/).
+    # Set to a positive value to re-enable the auto-simulator.
+    settlement_simulation_interval_seconds: int = 0
 
     # Settlement rejection file directories
     settlement_dir: str = "uploaded_files/settlement"   # where API-uploaded files are saved

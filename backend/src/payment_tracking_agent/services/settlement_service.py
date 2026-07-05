@@ -25,7 +25,7 @@ from payment_tracking_agent.config import settings
 from payment_tracking_agent.ledger import store
 from payment_tracking_agent.models.payment import PaymentStatus
 from payment_tracking_agent.models.return_file import RETURN_REASON_DESCRIPTIONS
-from payment_tracking_agent.models.settlement import ProcessedSettlementFile, RejectionRecord
+from payment_tracking_agent.models.settlement import FedAchSummary, ProcessedSettlementFile, RejectionRecord
 from payment_tracking_agent.parsers import settlement as settlement_parser
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def process_settlement_file(file_name: str, content: bytes) -> ProcessedSettleme
     Returns:
         ``ProcessedSettlementFile`` with per-record match results and LLM actions.
     """
-    raw_entries = settlement_parser.parse_settlement_bytes(content)
+    raw_entries, fed_ach_summary = settlement_parser.parse_settlement_bytes(content)
 
     # ------------------------------------------------------------------
     # Step 1: Deduplicate reason codes → single batched LLM call
@@ -138,8 +138,27 @@ def process_settlement_file(file_name: str, content: bytes) -> ProcessedSettleme
         matched_count=matched_count,
         unmatched_count=len(records) - matched_count,
         reason_codes_seen=list(seen_codes.keys()),
+        fed_ach_summary=fed_ach_summary,
     )
     store.save_settlement_file(result)
+    if fed_ach_summary:
+        store.append_event(
+            "SchemeAndSettlementAgent",
+            f"FedACH settlement summary received — {file_name}: "
+            f"settlement date {fed_ach_summary.settlement_datetime_display}, "
+            f"category {fed_ach_summary.category}, "
+            f"{fed_ach_summary.item_count} item(s), "
+            f"${fed_ach_summary.gross_amount_dollars:,.2f} ({fed_ach_summary.net_indicator}). "
+            "Settlement is summary-level evidence only; no payment-level clearing is claimed.",
+        )
+        logger.info(
+            "Settlement service [FedACH summary]: %s — date=%s category=%s items=%d amount=%d cents",
+            file_name,
+            fed_ach_summary.settlement_datetime_display,
+            fed_ach_summary.category,
+            fed_ach_summary.item_count,
+            fed_ach_summary.gross_amount_cents,
+        )
     if matched_count:
         store.append_event(
             "AfterPaymentSubmissionAgent",

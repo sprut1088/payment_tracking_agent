@@ -142,11 +142,27 @@ def update_all_payments_status(upload_id: str, new_status: PaymentStatus) -> Non
             entry.business_status = new_status.business_status
 
 
-def advance_submitted_to_beneficiary_bank() -> int:
-    """Advance all WITH_SCHEME_SUBMITTED payments to WITH_BENEFICIARY_BANK_PENDING.
+_IN_FLIGHT_STATUSES: frozenset[PaymentStatus] = frozenset({
+    # Still with bank but in the pipeline
+    PaymentStatus.WITH_BANK_UPLOADED,
+    PaymentStatus.WITH_BANK_VALIDATING,
+    PaymentStatus.WITH_BANK_READY_FOR_SCHEME,
+    # At the scheme
+    PaymentStatus.WITH_SCHEME_SUBMITTED,
+    PaymentStatus.WITH_SCHEME_ACKNOWLEDGED,
+})
 
-    Only moves payments that are currently WITH_SCHEME_SUBMITTED; any already-
-    rejected or further-advanced payments are left untouched.
+
+def advance_submitted_to_beneficiary_bank() -> int:
+    """Advance all in-flight payments to WITH_BENEFICIARY_BANK_PENDING.
+
+    Advances payments whose current status indicates they are anywhere in the
+    submission pipeline — uploaded, validating, ready-for-scheme, submitted, or
+    scheme-acknowledged.  Settlement evidence proves the batch reached the
+    beneficiary bank, so all pipeline payments move forward together.
+
+    Payments already rejected, failed validation, or already at beneficiary-bank
+    stage are left untouched.
 
     Returns:
         Count of payments advanced.
@@ -155,7 +171,7 @@ def advance_submitted_to_beneficiary_bank() -> int:
     for record in _uploads.values():
         for batch in record.parsed.batches:
             for entry in batch.entries:
-                if entry.status == PaymentStatus.WITH_SCHEME_SUBMITTED:
+                if entry.status in _IN_FLIGHT_STATUSES:
                     entry.status = PaymentStatus.WITH_BENEFICIARY_BANK_PENDING
                     entry.business_status = PaymentStatus.WITH_BENEFICIARY_BANK_PENDING.business_status
                     advanced += 1

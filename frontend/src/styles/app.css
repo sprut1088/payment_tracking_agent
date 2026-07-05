@@ -1080,11 +1080,17 @@ button {
 .batch-summary__time {
   font-family: var(--font-mono);
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .batch-summary__file {
   color: var(--text-muted);
   font-size: 0.78rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .batch-summary__id {

@@ -211,7 +211,7 @@ def _deterministic_level(signals: CustomerRiskSignals) -> tuple[RiskLevel, str]:
     if total == 0:
         return "LOW", "No payment history available for this customer."
 
-    if rate >= 50 or returns >= 2 or last_30d >= 2:
+    if rate > 50 or returns >= 2 or last_30d >= 2:
         parts: list[str] = [f"Rejection rate {rate:.0f}% ({rejected}/{total} payments)."]
         if returns >= 2:
             parts.append(f"{returns} beneficiary-bank returns on record.")
@@ -246,7 +246,7 @@ You will be given computed signals about a customer's payment history.
 Assess the customer's risk level as LOW, MEDIUM, or HIGH.
 
 Risk tier guidelines (use as a baseline — adjust for recency and clustering):
-- HIGH  : rejection rate ≥ 50%, OR ≥ 2 beneficiary-bank returns,
+- HIGH  : rejection rate > 50%, OR ≥ 2 beneficiary-bank returns,
           OR ≥ 2 rejections in the last 30 days (high velocity / clustering).
 - MEDIUM: rejection rate ≥ 20%, OR ≥ 1 beneficiary-bank return,
           OR ≥ 1 rejection in the last 30 days.

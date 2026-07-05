@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, computeFileRiskLevel, computeFileRiskReason, invalidatePaymentsCache } from "../api/client";
+import { api, computeBatchRiskLevel, computeBatchRiskReason, invalidatePaymentsCache } from "../api/client";
 import { AgentTracePanel } from "../components/AgentTracePanel";
 import { CycleTimeline } from "../components/CycleTimeline";
 import { LocalFolderDemoControls } from "../components/LocalFolderDemoControls";
@@ -173,8 +173,18 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
       <div className="grid grid--2">
         <PaymentStatusBoard
           state={
-            !demoMode && liveSummary
-              ? { ...state, summary: liveSummary }
+            !demoMode
+              ? {
+                  ...state,
+                  summary: liveSummary ?? {
+                    totalPayments: 0,
+                    withBank: 0,
+                    sentToScheme: 0,
+                    withBeneficiaryBank: 0,
+                    rejectedByScheme: 0,
+                    rejectedByBeneficiaryBank: 0,
+                  },
+                }
               : state
           }
           demoMode={demoMode}
@@ -203,8 +213,8 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
               <ol className="timeline">
                 {liveUploads.map((u) => {
                   const uploadPayments = livePayments.filter((p) => p.sourceFile === u.file_name);
-                  const fileRiskLevel = computeFileRiskLevel(uploadPayments);
-                  const fileRiskReason = computeFileRiskReason(uploadPayments);
+                  const fileRiskLevel = computeBatchRiskLevel(uploadPayments);
+                  const fileRiskReason = computeBatchRiskReason(uploadPayments);
                   const statusCounts: Partial<Record<BusinessStatus, number>> = {};
                   for (const p of uploadPayments) {
                     statusCounts[p.currentStatus] = (statusCounts[p.currentStatus] ?? 0) + 1;
