@@ -260,10 +260,31 @@ const allPayments: PaymentRecord[] = paymentSeeds.map(buildPayment);
 // Aggregations
 // ---------------------------------------------------------------------------
 
+export function computeFileRiskLevel(rows: PaymentRecord[]): import("../types/api").RiskLevel {
+  if (rows.some((r) => r.riskLevel === "HIGH")) return "HIGH";
+  if (rows.some((r) => r.riskLevel === "MEDIUM")) return "MEDIUM";
+  return "LOW";
+}
+
+export function computeFileRiskReason(rows: PaymentRecord[]): string {
+  const counts = { HIGH: 0, MEDIUM: 0, LOW: 0 } as Record<string, number>;
+  for (const r of rows) counts[r.riskLevel] = (counts[r.riskLevel] ?? 0) + 1;
+  const parts: string[] = [];
+  if (counts["HIGH"]) parts.push(`${counts["HIGH"]} HIGH`);
+  if (counts["MEDIUM"]) parts.push(`${counts["MEDIUM"]} MEDIUM`);
+  if (counts["LOW"]) parts.push(`${counts["LOW"]} LOW`);
+  const breakdown = `Risk breakdown: ${parts.join(", ")} across ${rows.length} payment${rows.length !== 1 ? "s" : ""}.`;
+  const topReason = ["HIGH", "MEDIUM"].flatMap((lvl) =>
+    rows.filter((r) => r.riskLevel === lvl && r.riskReason).map((r) => r.riskReason!),
+  )[0];
+  return topReason ? `${breakdown} ${topReason}` : breakdown;
+}
+
 function summarizeBatch(batchId: string, cycleTime: string, sourceFile: string): BatchSummary {
   const rows = allPayments.filter((p) => p.batchId === batchId);
   const count = (status: PaymentRecord["currentStatus"]) =>
     rows.filter((r) => r.currentStatus === status).length;
+  const rejectedCount = count("REJECTED BY SCHEME") + count("REJECTED BY BENEFICIARY BANK");
   return {
     batchId,
     cycleTime,
@@ -274,6 +295,10 @@ function summarizeBatch(batchId: string, cycleTime: string, sourceFile: string):
     withBeneficiaryBank: count("WITH BENEFICIARY BANK"),
     rejectedByScheme: count("REJECTED BY SCHEME"),
     rejectedByBeneficiaryBank: count("REJECTED BY BENEFICIARY BANK"),
+    fileRiskLevel: computeFileRiskLevel(rows),
+    fileRiskReason: computeFileRiskReason(rows),
+    rejectedPercentage:
+      rows.length > 0 ? Math.round((rejectedCount / rows.length) * 1000) / 10 : 0,
   };
 }
 
@@ -308,6 +333,7 @@ function summarizeCustomers(): CustomerSummary[] {
       customerId,
       customerName: rows[0].customerName,
       totalPayments: rows.length,
+      withBank: rows.filter((r) => r.currentStatus === "WITH BANK").length,
       sentToScheme,
       withBeneficiaryBank,
       rejectedByScheme,
@@ -359,6 +385,8 @@ const simulationState: SimulationState = {
       rejectedByScheme: 1,
       rejectedByBeneficiaryBank: 0,
       ranAt: "11:00:00",
+      fileRiskLevel: "MEDIUM",
+      fileRiskReason: "Risk breakdown: 1 MEDIUM, 3 LOW across 4 payments. Beneficiary had prior return pattern in last 60 days.",
     },
     {
       cycleTime: "11:04",
@@ -368,6 +396,8 @@ const simulationState: SimulationState = {
       rejectedByScheme: 1,
       rejectedByBeneficiaryBank: 1,
       ranAt: "11:04:00",
+      fileRiskLevel: "MEDIUM",
+      fileRiskReason: "Risk breakdown: 1 MEDIUM, 3 LOW across 4 payments. R01 Insufficient Funds return confirmed for Northline Components.",
     },
     {
       cycleTime: "11:08",
@@ -561,7 +591,7 @@ function mapBackendPayment(item: BackendPaymentListItem): PaymentRecord {
     cycleTime: uploadedTime,
     sourceFile: item.file_name,
     companyId: "",
-    customerId: item.individual_id_number.trim() || item.trace_number,
+    customerId: item.individual_id_number.trim() || item.individual_name.trim() || item.trace_number,
     customerName: item.individual_name.trim() || "Unknown",
     beneficiaryName: item.individual_name.trim() || "Unknown",
     receivingDfi: item.receiving_dfi,
@@ -641,19 +671,28 @@ function buildLiveBatchSummaries(payments: PaymentRecord[]): BatchSummary[] {
     list.push(p);
     byBatch.set(p.batchId, list);
   }
-  return Array.from(byBatch.entries()).map(([batchId, rows]) => ({
-    batchId,
-    cycleTime: rows[0].cycleTime,
-    sourceFile: rows[0].sourceFile,
-    paymentCount: rows.length,
-    withBank: rows.filter((r) => r.currentStatus === "WITH BANK").length,
-    sentToScheme: rows.filter((r) => r.currentStatus === "SENT TO SCHEME").length,
-    withBeneficiaryBank: rows.filter((r) => r.currentStatus === "WITH BENEFICIARY BANK").length,
-    rejectedByScheme: rows.filter((r) => r.currentStatus === "REJECTED BY SCHEME").length,
-    rejectedByBeneficiaryBank: rows.filter(
+  return Array.from(byBatch.entries()).map(([batchId, rows]) => {
+    const rejectedByScheme = rows.filter((r) => r.currentStatus === "REJECTED BY SCHEME").length;
+    const rejectedByBeneficiaryBank = rows.filter(
       (r) => r.currentStatus === "REJECTED BY BENEFICIARY BANK",
-    ).length,
-  }));
+    ).length;
+    const rejectedCount = rejectedByScheme + rejectedByBeneficiaryBank;
+    return {
+      batchId,
+      cycleTime: rows[0].cycleTime,
+      sourceFile: rows[0].sourceFile,
+      paymentCount: rows.length,
+      withBank: rows.filter((r) => r.currentStatus === "WITH BANK").length,
+      sentToScheme: rows.filter((r) => r.currentStatus === "SENT TO SCHEME").length,
+      withBeneficiaryBank: rows.filter((r) => r.currentStatus === "WITH BENEFICIARY BANK").length,
+      rejectedByScheme,
+      rejectedByBeneficiaryBank,
+      fileRiskLevel: computeFileRiskLevel(rows),
+      fileRiskReason: computeFileRiskReason(rows),
+      rejectedPercentage:
+        rows.length > 0 ? Math.round((rejectedCount / rows.length) * 1000) / 10 : 0,
+    };
+  });
 }
 
 export const api = {
@@ -797,6 +836,7 @@ export const api = {
       customer_id: string;
       customer_name: string;
       total_payments: number;
+      with_bank: number;
       sent_to_scheme: number;
       with_beneficiary_bank: number;
       rejected_by_scheme: number;
@@ -813,6 +853,7 @@ export const api = {
         customerId: r.customer_id,
         customerName: r.customer_name,
         totalPayments: r.total_payments,
+        withBank: r.with_bank,
         sentToScheme: r.sent_to_scheme,
         withBeneficiaryBank: r.with_beneficiary_bank,
         rejectedByScheme: r.rejected_by_scheme,

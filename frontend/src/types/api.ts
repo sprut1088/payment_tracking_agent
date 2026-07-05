@@ -55,6 +55,8 @@ export interface CycleRunSummary {
   rejectedByScheme: number;
   rejectedByBeneficiaryBank: number;
   ranAt?: string;
+  fileRiskLevel?: RiskLevel;
+  fileRiskReason?: string;
 }
 
 export interface EventLogEntry {
@@ -145,12 +147,16 @@ export interface BatchSummary {
   rejectedByScheme: number;
   rejectedByBeneficiaryBank: number;
   withBank: number;
+  fileRiskLevel: RiskLevel;
+  rejectedPercentage: number;
+  fileRiskReason: string;
 }
 
 export interface CustomerSummary {
   customerId: string;
   customerName: string;
   totalPayments: number;
+  withBank: number;
   sentToScheme: number;
   withBeneficiaryBank: number;
   rejectedByScheme: number;

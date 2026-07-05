@@ -101,12 +101,13 @@ export function CustomerDashboard({ onSelectPayment, demoMode, refreshKey }: Cus
             <div className="customer-card__name">{c.customerName}</div>
             <div className="customer-card__id">{c.customerId}</div>
             <div className="customer-card__metrics">
-              <span>{c.totalPayments} total</span>
-              <span className="text-info">{c.sentToScheme} sent to scheme</span>
-              <span className="text-warn">{c.withBeneficiaryBank} with beneficiary bank</span>
-              <span className="text-danger">{c.rejectedByScheme} rejected by scheme</span>
+              <span>{c.totalPayments} Total</span>
+              <span>{c.withBank} With Bank</span>
+              <span className="text-info">{c.sentToScheme} Sent to Scheme</span>
+              <span className="text-warn">{c.withBeneficiaryBank} With Beneficiary Bank</span>
+              <span className="text-danger">{c.rejectedByScheme} Rejected by Scheme</span>
               <span className="text-danger-2">
-                {c.rejectedByBeneficiaryBank} rejected by beneficiary bank
+                {c.rejectedByBeneficiaryBank} Rejected by Beneficiary Bank
               </span>
             </div>
             <div className="customer-card__history">

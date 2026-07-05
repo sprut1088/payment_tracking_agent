@@ -4,9 +4,10 @@ import { StatusBadge } from "./StatusBadge";
 interface PaymentStatusBoardProps {
   state: SimulationState;
   demoMode?: boolean;
+  underReviewCount?: number;
 }
 
-export function PaymentStatusBoard({ state, demoMode = true }: PaymentStatusBoardProps) {
+export function PaymentStatusBoard({ state, demoMode = true, underReviewCount = 0 }: PaymentStatusBoardProps) {
   const { summary } = state;
   const items: Array<{ status: Parameters<typeof StatusBadge>[0]["status"]; count: number }> = [
     { status: "WITH BANK", count: summary.withBank },
@@ -41,6 +42,14 @@ export function PaymentStatusBoard({ state, demoMode = true }: PaymentStatusBoar
             <StatusBadge status={i.status} size="sm" />
           </div>
         ))}
+        {!demoMode && underReviewCount > 0 && (
+          <div className="status-board__cell">
+            <div className="status-board__count">{underReviewCount}</div>
+            <span className="status-badge status-badge--under-review status-badge--sm">
+              UNDER REVIEW
+            </span>
+          </div>
+        )}
       </div>
     </section>
   );

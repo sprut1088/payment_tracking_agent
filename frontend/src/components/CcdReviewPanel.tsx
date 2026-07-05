@@ -159,7 +159,7 @@ function ReviewCard({
           >
             {expanded ? "Hide diff" : "Show diff"}
           </button>
-          {item.corrected_file_content && (
+          {item.corrected_file_content ? (
             <button
               type="button"
               className="button button--sm button--primary"
@@ -168,6 +168,13 @@ function ReviewCard({
             >
               Accept corrections
             </button>
+          ) : (
+            <span
+              className="review-card__no-corrections"
+              data-tooltip="No auto-corrections available — LLM not configured or corrections could not be generated. Edit the file manually and re-upload."
+            >
+              No auto-corrections
+            </span>
           )}
           <button
             type="button"

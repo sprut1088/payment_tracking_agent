@@ -88,6 +88,7 @@ class CustomerSummaryItem(BaseModel):
     customer_id: str
     customer_name: str
     total_payments: int
+    with_bank: int
     sent_to_scheme: int
     with_beneficiary_bank: int
     rejected_by_scheme: int

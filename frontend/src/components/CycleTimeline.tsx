@@ -53,6 +53,14 @@ export function CycleTimeline({ plan, runs, activeCycle }: CycleTimelineProps) {
                 )}
                 {run && run.status === "COMPLETE" && (
                   <div className="timeline__metrics">
+                    {run.fileRiskLevel && (
+                      <span
+                        className={`risk risk--${run.fileRiskLevel.toLowerCase()}`}
+                        data-tooltip={run.fileRiskReason}
+                      >
+                        {run.fileRiskLevel} risk
+                      </span>
+                    )}
                     <span>+{run.paymentsCreated} payments</span>
                     <span>{run.movedToBeneficiaryBank} moved to beneficiary bank</span>
                     <span>{run.rejectedByScheme} rejected by scheme</span>

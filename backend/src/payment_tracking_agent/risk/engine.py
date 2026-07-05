@@ -124,6 +124,11 @@ class CustomerRiskSignals:
 # Signal computation
 # ---------------------------------------------------------------------------
 
+def _customer_key(entry: EntryDetailRecord) -> str:
+    """Stable customer grouping key: ID → name → trace (as last resort)."""
+    return entry.individual_id_number or entry.individual_name or entry.trace_number
+
+
 def _compute_signals(
     customer_id: str,
     history: list[tuple[EntryDetailRecord, datetime]],
@@ -138,7 +143,7 @@ def _compute_signals(
 
     customer_history = [
         (entry, ts) for entry, ts in history
-        if entry.individual_id_number == customer_id
+        if _customer_key(entry) == customer_id
     ]
     total = len(customer_history)
 

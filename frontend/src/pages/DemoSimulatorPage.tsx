@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, invalidatePaymentsCache } from "../api/client";
+import { api, computeFileRiskLevel, computeFileRiskReason, invalidatePaymentsCache } from "../api/client";
 import { AgentTracePanel } from "../components/AgentTracePanel";
 import { CycleTimeline } from "../components/CycleTimeline";
 import { LocalFolderDemoControls } from "../components/LocalFolderDemoControls";
@@ -178,6 +178,7 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
               : state
           }
           demoMode={demoMode}
+          underReviewCount={liveAwaitingReview}
         />
         {demoMode ? (
           <CycleTimeline
@@ -202,6 +203,8 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
               <ol className="timeline">
                 {liveUploads.map((u) => {
                   const uploadPayments = livePayments.filter((p) => p.sourceFile === u.file_name);
+                  const fileRiskLevel = computeFileRiskLevel(uploadPayments);
+                  const fileRiskReason = computeFileRiskReason(uploadPayments);
                   const statusCounts: Partial<Record<BusinessStatus, number>> = {};
                   for (const p of uploadPayments) {
                     statusCounts[p.currentStatus] = (statusCounts[p.currentStatus] ?? 0) + 1;
@@ -226,6 +229,12 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
                         </div>
                         <div className="timeline__label">{u.file_name}</div>
                         <div className="timeline__metrics">
+                          <span
+                            className={`risk risk--${fileRiskLevel.toLowerCase()}`}
+                            data-tooltip={uploadPayments.length > 0 ? fileRiskReason : undefined}
+                          >
+                            {fileRiskLevel} risk
+                          </span>
                           <span>{u.entry_count} payment(s)</span>
                           {Object.entries(statusCounts).map(([s, n]) => (
                             <span key={s}>{s}: {n}</span>

@@ -224,7 +224,7 @@ def list_payments(
                 if business_status and entry.business_status != business_status:
                     continue
                 risk_level, risk_reason = _get_risk(
-                    entry.individual_id_number or entry.trace_number
+                    entry.individual_id_number or entry.individual_name or entry.trace_number
                 )
                 results.append(
                     PaymentListItem(
@@ -268,7 +268,7 @@ def list_customers() -> list[CustomerSummaryItem]:
     for record in store.list_uploads():
         for batch in record.parsed.batches:
             for entry in batch.entries:
-                cid = entry.individual_id_number or entry.trace_number
+                cid = entry.individual_id_number or entry.individual_name or entry.trace_number
                 by_customer.setdefault(cid, []).append(entry)
 
     if not by_customer:
@@ -282,6 +282,13 @@ def list_customers() -> list[CustomerSummaryItem]:
             risk_cache[cid] = compute_customer_risk(cid, history)
         return risk_cache[cid]
 
+    _BANK_STATUSES = (
+        PaymentStatus.WITH_BANK_NOT_UPLOADED,
+        PaymentStatus.WITH_BANK_UPLOADED,
+        PaymentStatus.WITH_BANK_VALIDATING,
+        PaymentStatus.WITH_BANK_VALIDATION_FAILED,
+        PaymentStatus.WITH_BANK_READY_FOR_SCHEME,
+    )
     _SCHEME_STATUSES = (
         PaymentStatus.WITH_SCHEME_SUBMITTED,
         PaymentStatus.WITH_SCHEME_ACKNOWLEDGED,
@@ -298,6 +305,7 @@ def list_customers() -> list[CustomerSummaryItem]:
                 customer_id=cid,
                 customer_name=entries[0].individual_name or "Unknown",
                 total_payments=len(entries),
+                with_bank=sum(1 for e in entries if e.status in _BANK_STATUSES),
                 sent_to_scheme=sum(1 for e in entries if e.status in _SCHEME_STATUSES),
                 with_beneficiary_bank=sum(1 for e in entries if e.status in _BENEFICIARY_STATUSES),
                 rejected_by_scheme=sum(1 for e in entries if e.status in _REJECTED_SCHEME),

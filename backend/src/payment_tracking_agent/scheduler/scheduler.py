@@ -35,6 +35,7 @@ Frontend buttons use demo-inbox/ folders; the scheduler watches drop/ folders.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from datetime import datetime, timezone
@@ -331,16 +332,34 @@ def _job_scan_ccd_files() -> None:
                     path.name,
                 )
                 _move_unique(path, under_review_dir)
+                # Write corrections JSON so the review panel can display errors
+                corrections_path = under_review_dir / (path.stem + ".corrections.json")
+                try:
+                    corrections_data = {
+                        "errors": [
+                            f"Line {e.line_number} [{e.record_type}] {e.field}: {e.issue}"
+                            for e in result.validation_errors
+                        ],
+                        "corrected_file_content": result.corrected_file_content,
+                        "corrected_lines": [
+                            cl.model_dump() for cl in result.corrected_lines
+                        ] if result.corrected_lines else None,
+                    }
+                    corrections_path.write_text(
+                        json.dumps(corrections_data, indent=2), encoding="utf-8"
+                    )
+                except Exception as _cj_exc:  # noqa: BLE001
+                    logger.warning("Could not write corrections JSON for %s: %s", path.name, _cj_exc)
                 store.record_drop_file(
                     filename=path.name,
                     file_type="ccd",
                     outcome="under-review",
                     size_bytes=len(content),
-                    detail=f"{result.validation_error_count} syntax error(s)",
+                    detail=f"{len(result.validation_errors)} syntax error(s)",
                 )
                 store.append_event(
                     "BeforePaymentSubmissionAgent",
-                    f"CCD file received — {path.name}: {result.validation_error_count} syntax "
+                    f"CCD file received — {path.name}: {len(result.validation_errors)} syntax "
                     "error(s) detected. File moved to under-review for correction.",
                 )
         except Exception as exc:

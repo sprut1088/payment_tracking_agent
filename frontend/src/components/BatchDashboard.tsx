@@ -139,13 +139,25 @@ export function BatchDashboard({ onSelectPayment, demoMode, refreshKey }: BatchD
               <span className="batch-summary__file">{b.sourceFile}</span>
             </div>
             <div className="batch-summary__id">{b.batchId}</div>
+            <div className="batch-summary__risk-row">
+              <span
+                className={`risk risk--${b.fileRiskLevel.toLowerCase()}`}
+                data-tooltip={b.fileRiskReason}
+              >
+                {b.fileRiskLevel} risk
+              </span>
+              <span className={b.rejectedPercentage > 0 ? "text-danger" : "text-success"}>
+                {b.rejectedPercentage.toFixed(1)}% rejected
+              </span>
+            </div>
             <div className="batch-summary__metrics">
-              <span>{b.paymentCount} total</span>
-              <span className="text-info">{b.sentToScheme} sent to scheme</span>
-              <span className="text-warn">{b.withBeneficiaryBank} with beneficiary bank</span>
-              <span className="text-danger">{b.rejectedByScheme} rejected by scheme</span>
+              <span>{b.paymentCount} Total</span>
+              <span>{b.withBank} With Bank</span>
+              <span className="text-info">{b.sentToScheme} Sent to Scheme</span>
+              <span className="text-warn">{b.withBeneficiaryBank} With Beneficiary Bank</span>
+              <span className="text-danger">{b.rejectedByScheme} Rejected by Scheme</span>
               <span className="text-danger-2">
-                {b.rejectedByBeneficiaryBank} rejected by beneficiary bank
+                {b.rejectedByBeneficiaryBank} Rejected by Beneficiary Bank
               </span>
             </div>
           </button>

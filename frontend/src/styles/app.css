@@ -655,6 +655,12 @@ button {
   border-color: rgba(251, 146, 60, 0.42);
 }
 
+.status-badge--under-review {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.35);
+}
+
 /* ---------------- Timeline ---------------- */
 
 .timeline {
@@ -1096,6 +1102,13 @@ button {
   color: var(--text-muted);
 }
 
+.batch-summary__risk-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+
 .customer-card__name {
   font-weight: 600;
 }
@@ -1141,6 +1154,40 @@ button {
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.05em;
+}
+
+/* Tooltip — attach data-tooltip="…" to any element */
+[data-tooltip] {
+  position: relative;
+  cursor: default;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-3, #1e293b);
+  color: var(--text, #e2e8f0);
+  border: 1px solid var(--line, #334155);
+  border-radius: 4px;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  max-width: 260px;
+  width: max-content;
+  text-align: left;
+  z-index: 200;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
 }
 
 .risk--low {
@@ -1467,6 +1514,14 @@ button {
   display: flex;
   gap: 0.5rem;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.review-card__no-corrections {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: default;
 }
 
 .review-card__errors {

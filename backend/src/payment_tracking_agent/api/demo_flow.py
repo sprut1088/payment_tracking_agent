@@ -25,6 +25,7 @@ from payment_tracking_agent.models.demo_flow import (
     ScanResult,
     UnderReviewItem,
 )
+from payment_tracking_agent.config import settings
 from payment_tracking_agent.ledger import store
 from payment_tracking_agent.services import return_file_service, settlement_service, upload_service
 from payment_tracking_agent.services.upload_service import UploadValidationError
@@ -205,11 +206,17 @@ def accept_correction(
     result = upload_service.process_ccd_upload(body.file_name, content_bytes)
 
     if result.is_valid:
-        # Clean up the under-review files for this batch.
-        under_review_ccd = watcher.config_view.under_review_dir / "ccd"
+        # Clean up the under-review files for this batch from BOTH under-review directories.
+        # The demo-inbox path is used by the Scan CCD button; the drop path by the scheduler.
+        under_review_dirs = [
+            watcher.config_view.under_review_dir / "ccd",
+            Path(settings.ccd_scan_under_review_dir),
+        ]
         processed_ccd = watcher.config_view.processed_dir / "ccd"
-        if under_review_ccd.exists():
-            processed_ccd.mkdir(parents=True, exist_ok=True)
+        processed_ccd.mkdir(parents=True, exist_ok=True)
+        for under_review_ccd in under_review_dirs:
+            if not under_review_ccd.exists():
+                continue
             for f in under_review_ccd.glob(f"{body.batch_id}.*"):
                 try:
                     shutil.move(str(f), str(processed_ccd / f.name))
@@ -248,39 +255,52 @@ def accept_correction(
 def get_under_review(
     watcher: FolderWatcher = Depends(get_folder_watcher),
 ) -> list[UnderReviewItem]:
-    """Return all CCD files currently in the under-review queue."""
-    under_review_ccd = watcher.config_view.under_review_dir / "ccd"
-    if not under_review_ccd.exists():
-        return []
+    """Return all CCD files currently in the under-review queue.
+
+    Scans both the demo-inbox under-review folder (used by the Scan CCD button)
+    and the scheduler's drop/ccd/under-review folder (used by the auto-scanner).
+    Both paths store a .corrections.json file alongside the original .ach file.
+    """
+    scan_dirs = [
+        watcher.config_view.under_review_dir / "ccd",
+        Path(settings.ccd_scan_under_review_dir),
+    ]
 
     items: list[UnderReviewItem] = []
-    for corrections_file in sorted(under_review_ccd.glob("*.corrections.json")):
-        stem = corrections_file.stem.replace(".corrections", "")
-        # Find the original file (anything that isn't the corrections JSON).
-        orig_candidates = [
-            f for f in under_review_ccd.glob(f"{stem}.*")
-            if not f.name.endswith(".corrections.json")
-        ]
-        if not orig_candidates:
+    seen: set[str] = set()  # deduplicate by file stem in case paths overlap
+
+    for under_review_ccd in scan_dirs:
+        if not under_review_ccd.exists():
             continue
-        orig_file = orig_candidates[0]
-        try:
-            original_content = orig_file.read_text(encoding="ascii", errors="replace")
-            corrections_data: dict = json.loads(corrections_file.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("under-review: could not read %s: %s", orig_file, exc)
-            continue
-        items.append(UnderReviewItem(
-            file_name=orig_file.name,
-            batch_id=stem,
-            discovered_at=datetime.fromtimestamp(
-                orig_file.stat().st_mtime, tz=timezone.utc
-            ).isoformat(),
-            errors=corrections_data.get("errors", []),
-            original_content=original_content,
-            corrected_file_content=corrections_data.get("corrected_file_content"),
-            corrected_lines=corrections_data.get("corrected_lines"),
-        ))
+        for corrections_file in sorted(under_review_ccd.glob("*.corrections.json")):
+            stem = corrections_file.stem.replace(".corrections", "")
+            if stem in seen:
+                continue
+            seen.add(stem)
+            orig_candidates = [
+                f for f in under_review_ccd.glob(f"{stem}.*")
+                if not f.name.endswith(".corrections.json")
+            ]
+            if not orig_candidates:
+                continue
+            orig_file = orig_candidates[0]
+            try:
+                original_content = orig_file.read_text(encoding="ascii", errors="replace")
+                corrections_data: dict = json.loads(corrections_file.read_text(encoding="utf-8"))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("under-review: could not read %s: %s", orig_file, exc)
+                continue
+            items.append(UnderReviewItem(
+                file_name=orig_file.name,
+                batch_id=stem,
+                discovered_at=datetime.fromtimestamp(
+                    orig_file.stat().st_mtime, tz=timezone.utc
+                ).isoformat(),
+                errors=corrections_data.get("errors", []),
+                original_content=original_content,
+                corrected_file_content=corrections_data.get("corrected_file_content"),
+                corrected_lines=corrections_data.get("corrected_lines"),
+            ))
     return items
 
 
@@ -290,11 +310,16 @@ def reject_correction(
     watcher: FolderWatcher = Depends(get_folder_watcher),
 ) -> Response:
     """Reject all corrections for a file — move it from under-review to processed/rejected."""
-    under_review_ccd = watcher.config_view.under_review_dir / "ccd"
+    under_review_dirs = [
+        watcher.config_view.under_review_dir / "ccd",
+        Path(settings.ccd_scan_under_review_dir),
+    ]
     rejected_dir = watcher.config_view.processed_dir / "ccd" / "rejected"
     rejected_dir.mkdir(parents=True, exist_ok=True)
 
-    if under_review_ccd.exists():
+    for under_review_ccd in under_review_dirs:
+        if not under_review_ccd.exists():
+            continue
         for f in under_review_ccd.glob(f"{body.batch_id}.*"):
             try:
                 shutil.move(str(f), str(rejected_dir / f.name))
