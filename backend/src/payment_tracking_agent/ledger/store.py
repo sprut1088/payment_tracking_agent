@@ -15,6 +15,11 @@ from payment_tracking_agent.models.ledger import (
     PaymentStatus,
     PaymentStatusEvent,
 )
+from payment_tracking_agent.models.ai_risk import (
+    BatchRiskClassification,
+    CustomerRiskClassification,
+    RiskClassification,
+)
 
 
 class PaymentLedger:
@@ -71,6 +76,57 @@ class PaymentLedger:
                 PaymentStatusEvent(status=status, at=at, evidence=evidence)
             )
             payment.evidence.append(evidence)
+            return payment
+
+
+    def set_risk_classification(
+        self, payment_id: str, classification: RiskClassification
+    ) -> Payment | None:
+        """Stamp an AI risk classification onto a payment.
+
+        The previous ``current_risk_classification`` (if any) is moved into
+        ``risk_classification_history`` so callers can inspect the trend.
+        Never mutates ``current_status``, ``status_history``, or ``evidence``.
+        """
+        with self._lock:
+            payment = self._payments.get(payment_id)
+            if payment is None:
+                return None
+            if payment.current_risk_classification is not None:
+                payment.risk_classification_history.append(
+                    payment.current_risk_classification
+                )
+            payment.current_risk_classification = classification
+            return payment
+
+    def set_customer_risk_classification(
+        self, payment_id: str, classification: CustomerRiskClassification
+    ) -> Payment | None:
+        """Stamp customer-level risk classification onto a payment."""
+        with self._lock:
+            payment = self._payments.get(payment_id)
+            if payment is None:
+                return None
+            if payment.current_customer_risk_classification is not None:
+                payment.customer_risk_classification_history.append(
+                    payment.current_customer_risk_classification
+                )
+            payment.current_customer_risk_classification = classification
+            return payment
+
+    def set_batch_risk_classification(
+        self, payment_id: str, classification: BatchRiskClassification
+    ) -> Payment | None:
+        """Stamp batch-level risk classification onto a payment."""
+        with self._lock:
+            payment = self._payments.get(payment_id)
+            if payment is None:
+                return None
+            if payment.current_batch_risk_classification is not None:
+                payment.batch_risk_classification_history.append(
+                    payment.current_batch_risk_classification
+                )
+            payment.current_batch_risk_classification = classification
             return payment
 
 

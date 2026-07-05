@@ -46,18 +46,28 @@ export function LiveBatchDashboard() {
   const payments = ledger?.payments ?? [];
   const groups = useMemo(() => groupByBatch(payments), [payments]);
   const totalCounts = useMemo(() => countByStatus(payments), [payments]);
+  const batchRows = useMemo(
+    () =>
+      groups.map((group) => ({
+        ...group,
+        batchRisk:
+          group.payments.find((p) => p.current_batch_risk_classification)
+            ?.current_batch_risk_classification ?? null,
+      })),
+    [groups],
+  );
 
   useEffect(() => {
     if (groups.length === 0) {
       if (selectedBatch !== "") setSelectedBatch("");
       return;
     }
-    if (!groups.some((g) => g.batchKey === selectedBatch)) {
-      setSelectedBatch(groups[0].batchKey);
+    if (!batchRows.some((g) => g.batchKey === selectedBatch)) {
+      setSelectedBatch(batchRows[0].batchKey);
     }
-  }, [groups, selectedBatch]);
+  }, [batchRows, groups.length, selectedBatch]);
 
-  const activeGroup = groups.find((g) => g.batchKey === selectedBatch) ?? null;
+  const activeGroup = batchRows.find((g) => g.batchKey === selectedBatch) ?? null;
   const activePayments = activeGroup
     ? sortPaymentsByPaymentId(activeGroup.payments)
     : [];
@@ -102,86 +112,157 @@ export function LiveBatchDashboard() {
         ))}
       </div>
 
-      <div className="batch-summary">
-        {groups.map((group) => (
-          <button
-            type="button"
-            key={group.batchKey}
-            className={
-              "batch-summary__card" +
-              (selectedBatch === group.batchKey
-                ? " batch-summary__card--active"
-                : "")
-            }
-            onClick={() => setSelectedBatch(group.batchKey)}
-          >
-            <div className="batch-summary__head">
-              <span className="batch-summary__file">{group.sourceFile}</span>
-            </div>
-            <div className="batch-summary__id">{group.batchKey}</div>
-            <div className="batch-summary__metrics">
-              <span>{group.payments.length} total</span>
-              <span className="text-info">
-                {group.counts["SENT TO SCHEME"]} sent to scheme
-              </span>
-              <span className="text-warn">
-                {group.counts["WITH BENEFICIARY BANK"]} with beneficiary bank
-              </span>
-              <span className="text-danger">
-                {group.counts["REJECTED BY SCHEME"]} rejected by scheme
-              </span>
-              <span className="text-danger-2">
-                {group.counts["REJECTED BY BENEFICIARY BANK"]} rejected by
-                beneficiary bank
-              </span>
-            </div>
-          </button>
-        ))}
-      </div>
+      <p className="table__note">
+        AI risk classification uses deterministic ledger evidence, demo
+        customer history, and available CCD validation findings. It does not
+        determine payment status, credit risk, or fraud risk.
+      </p>
 
       <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
-              <th>Batch key</th>
-              <th>Payment ID</th>
-              <th>Trace number</th>
-              <th>Individual name</th>
-              <th>Individual ID</th>
-              <th className="table__num">Amount</th>
-              <th>Current status</th>
-              <th>Latest evidence</th>
+              <th>Batch Key</th>
+              <th>Source File</th>
+              <th>Batch Risk Band</th>
+              <th>Risk Score</th>
+              <th>Confidence Score</th>
+              <th>Validation Findings</th>
+              <th>Summary</th>
+              <th>Recommendation</th>
+              <th>Total Payments</th>
+              <th>Status Counts</th>
+              <th className="table__action">Context</th>
             </tr>
           </thead>
           <tbody>
-            {activePayments.length === 0 && (
+            {batchRows.length === 0 && (
               <tr>
-                <td colSpan={8} className="table__empty">
+                <td colSpan={11} className="table__empty">
                   {EMPTY_STATE_MESSAGE}
                 </td>
               </tr>
             )}
-            {activePayments.map((payment) => (
-              <tr key={payment.payment_id}>
-                <td className="table__mono">{payment.batch_key}</td>
-                <td className="table__mono">{payment.payment_id}</td>
-                <td className="table__mono">{payment.trace_number}</td>
-                <td>{payment.individual_name}</td>
-                <td className="table__mono">{payment.individual_id_number}</td>
-                <td className="table__num">
-                  {formatDollars(payment.amount_cents)}
+            {batchRows.map((batch) => (
+              <tr
+                key={batch.batchKey}
+                className={
+                  selectedBatch === batch.batchKey ? "table__row-selected" : ""
+                }
+              >
+                <td className="table__mono">{batch.batchKey}</td>
+                <td>
+                  <span className="table__mono">{batch.sourceFile}</span>
                 </td>
                 <td>
-                  <StatusBadge status={payment.current_status} size="sm" />
+                  {batch.batchRisk ? (
+                    <span
+                      className={
+                        "ai-risk-badge ai-risk-badge--" +
+                        batch.batchRisk.risk_band.toLowerCase()
+                      }
+                    >
+                      {batch.batchRisk.risk_band}
+                    </span>
+                  ) : (
+                    <span className="table__subtle">N/A</span>
+                  )}
+                </td>
+                <td>
+                  {batch.batchRisk
+                    ? `${batch.batchRisk.risk_score}/100`
+                    : "N/A"}
+                </td>
+                <td>
+                  {batch.batchRisk
+                    ? `${batch.batchRisk.confidence_score}/100`
+                    : "N/A"}
                 </td>
                 <td className="live-ledger__evidence">
-                  {latestEvidenceSummary(payment)}
+                  {batch.batchRisk && batch.batchRisk.validation_findings.length > 0 ? (
+                    <ul className="table__list-compact">
+                      {batch.batchRisk.validation_findings.slice(0, 2).map((finding, idx) => (
+                        <li key={idx}>{finding}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    "No validation findings"
+                  )}
+                </td>
+                <td className="live-ledger__evidence">
+                  {batch.batchRisk
+                    ? batch.batchRisk.summary
+                    : "N/A"}
+                </td>
+                <td className="live-ledger__evidence">
+                  {batch.batchRisk
+                    ? batch.batchRisk.recommendation
+                    : "N/A"}
+                </td>
+                <td className="table__mono">
+                  {batch.payments.length}
+                </td>
+                <td className="live-ledger__evidence">
+                  {batch.counts["WITH BANK"]} with bank · {batch.counts["SENT TO SCHEME"]} sent to scheme · {batch.counts["WITH BENEFICIARY BANK"]} with beneficiary bank · {batch.counts["REJECTED BY SCHEME"]} rejected by scheme · {batch.counts["REJECTED BY BENEFICIARY BANK"]} rejected by beneficiary bank
+                </td>
+                <td className="table__action">
+                  <button
+                    type="button"
+                    className="button button--link"
+                    onClick={() => setSelectedBatch(batch.batchKey)}
+                  >
+                    Payments
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <section className="live-detail__section">
+        <h3 className="live-detail__section-title">
+          Batch Payment Context {activeGroup ? `- ${activeGroup.batchKey}` : ""}
+        </h3>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Payment ID</th>
+                <th>Trace Number</th>
+                <th>Individual Name</th>
+                <th>Individual ID</th>
+                <th className="table__num">Amount</th>
+                <th>Status</th>
+                <th>Latest Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activePayments.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="table__empty">
+                    Select a batch to view payment context.
+                  </td>
+                </tr>
+              )}
+              {activePayments.map((payment) => (
+                <tr key={payment.payment_id}>
+                  <td className="table__mono">{payment.payment_id}</td>
+                  <td className="table__mono">{payment.trace_number}</td>
+                  <td>{payment.individual_name}</td>
+                  <td className="table__mono">{payment.individual_id_number}</td>
+                  <td className="table__num">{formatDollars(payment.amount_cents)}</td>
+                  <td>
+                    <StatusBadge status={payment.current_status} size="sm" />
+                  </td>
+                  <td className="live-ledger__evidence">{latestEvidenceSummary(payment)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <p className="table__note">
         Settlement summary evidence is aggregate only; no payment-level
         clearing is claimed. A payment remaining with the beneficiary bank

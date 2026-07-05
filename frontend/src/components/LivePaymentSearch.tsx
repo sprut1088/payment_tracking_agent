@@ -8,9 +8,13 @@ import {
 } from "../api/ledger";
 import type {
   AIExplanationResponse,
+  BatchRiskClassification,
+  CustomerRiskClassification,
   ExplanationPreset,
   LedgerPayment,
   PaymentLedgerView,
+  RiskClassification,
+  RiskClassificationTrigger,
 } from "../types/api";
 import { StatusBadge } from "./StatusBadge";
 
@@ -27,6 +31,20 @@ function matchesQuery(payment: LedgerPayment, needle: string): boolean {
     payment.individual_name.toLowerCase().includes(q) ||
     payment.batch_key.toLowerCase().includes(q)
   );
+}
+
+function confidencePercentFromBand(
+  band: "LOW" | "MEDIUM" | "HIGH",
+): number {
+  if (band === "HIGH") return 85;
+  if (band === "MEDIUM") return 65;
+  return 35;
+}
+
+function paymentRiskRowClass(payment: LedgerPayment): string {
+  const band = payment.current_risk_classification?.risk_band.toLowerCase();
+  if (!band) return "";
+  return `table__row-risk--${band}`;
 }
 
 interface LiveDetailProps {
@@ -142,6 +160,10 @@ function LivePaymentDetail({ payment, onClose }: LiveDetailProps) {
       </section>
 
       <AiExplanationPanel key={payment.payment_id} payment={payment} />
+      <RiskClassificationView
+        key={`risk-${payment.payment_id}`}
+        payment={payment}
+      />
     </section>
   );
 }
@@ -294,6 +316,250 @@ function AiExplanationPanel({ payment }: AiExplanationPanelProps) {
   );
 }
 
+interface RiskClassificationViewProps {
+  payment: LedgerPayment;
+}
+
+const TRIGGER_LABEL: Record<RiskClassificationTrigger, string> = {
+  CCD_UPLOAD: "CCD upload",
+  SETTLEMENT_OR_SCHEME_REJECT: "Settlement / scheme reject",
+  NACHA_RETURN: "NACHA return",
+};
+
+function RiskClassificationCard({
+  classification,
+  variant,
+}: {
+  classification: RiskClassification;
+  variant: "current" | "history";
+}) {
+  const band = classification.risk_band.toLowerCase();
+  const confidence = classification.clearing_confidence.toLowerCase();
+  return (
+    <div
+      className={
+        "ai-panel__result ai-risk-card" +
+        (variant === "history" ? " ai-risk-card--history" : "")
+      }
+    >
+      <div className="ai-panel__risk-badges">
+        <span className={`ai-risk-badge ai-risk-badge--${band}`}>
+          Risk band: {classification.risk_band}
+        </span>
+        <span className="ai-risk-badge ai-risk-badge--score">
+          Score: {classification.risk_score}/100
+        </span>
+        <span
+          className={`ai-risk-badge ai-risk-badge--confidence ai-risk-badge--${confidence}`}
+        >
+          Clearing confidence: {classification.clearing_confidence}
+        </span>
+      </div>
+      <p className="ai-panel__helper">
+        {classification.clearing_confidence_note}
+      </p>
+      <div className="ai-panel__field">
+        <span className="ai-panel__label">Trigger</span>
+        <p>
+          {TRIGGER_LABEL[classification.trigger]}{" "}
+          <span className="live-detail__evidence-time">
+            · Classified {formatTimestamp(classification.classified_at)}
+          </span>
+        </p>
+      </div>
+      <div className="ai-panel__field">
+        <span className="ai-panel__label">Summary</span>
+        <p>{classification.summary}</p>
+      </div>
+      <div className="ai-panel__field">
+        <span className="ai-panel__label">Risk drivers</span>
+        {classification.risk_drivers.length === 0 ? (
+          <p className="live-detail__empty">No risk drivers recorded.</p>
+        ) : (
+          <ul className="ai-panel__list">
+            {classification.risk_drivers.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="ai-panel__field">
+        <span className="ai-panel__label">Evidence used</span>
+        {classification.evidence_used.length === 0 ? (
+          <p className="live-detail__empty">No evidence items listed.</p>
+        ) : (
+          <ul className="ai-panel__list">
+            {classification.evidence_used.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="ai-panel__field">
+        <span className="ai-panel__label">Recommendation</span>
+        <p>{classification.recommendation || "(No recommendation recorded.)"}</p>
+      </div>
+      {classification.prior_prediction && (
+        <div className="ai-panel__field">
+          <span className="ai-panel__label">Prior prediction vs actual outcome</span>
+          <p>{classification.prior_prediction.narrative}</p>
+          <p className="ai-panel__meta">
+            Prior score {classification.prior_prediction.prior_risk_score ?? "N/A"} ·
+            Prior band {classification.prior_prediction.prior_risk_band ?? "N/A"} ·
+            Prior clearing confidence {classification.prior_prediction.prior_clearing_confidence ?? "N/A"} ·
+            Outcome {classification.prior_prediction.actual_outcome_status} ·
+            Alignment {classification.prior_prediction.outcome_alignment}
+          </p>
+        </div>
+      )}
+      <p className="ai-panel__meta">
+        Provider {classification.provider} · Model{" "}
+        <span className="table__mono">{classification.model}</span>
+      </p>
+    </div>
+  );
+}
+
+function RiskClassificationView({ payment }: RiskClassificationViewProps) {
+  const current = payment.current_risk_classification;
+  const history = payment.risk_classification_history;
+
+  return (
+    <section className="live-detail__section ai-panel ai-risk-panel">
+      <div className="ai-panel__header">
+        <h4 className="live-detail__section-title">AI Payment Risk Classification</h4>
+        <p className="ai-panel__helper">
+          AI risk classification uses deterministic ledger evidence, demo
+          customer history, and available CCD validation findings. It does not
+          determine payment status, credit risk, or fraud risk.
+        </p>
+        <p className="ai-panel__helper">
+          Clearing confidence is an operational AI confidence score, not
+          payment-level clearing evidence.
+        </p>
+      </div>
+      {current === null ? (
+        <p className="live-detail__empty">
+          No AI risk classification stamped yet for this payment.
+        </p>
+      ) : (
+        <RiskClassificationCard classification={current} variant="current" />
+      )}
+      {history.length > 0 && (
+        <div className="ai-risk-history">
+          <h5 className="live-detail__section-title live-detail__section-title--sub">
+            Prior classifications
+          </h5>
+          <ol className="ai-risk-history__list">
+            {[...history].reverse().map((entry, idx) => (
+              <li key={idx}>
+                <RiskClassificationCard
+                  classification={entry}
+                  variant="history"
+                />
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      <CustomerRiskView
+        current={payment.current_customer_risk_classification}
+        history={payment.customer_risk_classification_history}
+      />
+      <BatchRiskView
+        current={payment.current_batch_risk_classification}
+        history={payment.batch_risk_classification_history}
+      />
+    </section>
+  );
+}
+
+function CustomerRiskView({
+  current,
+  history,
+}: {
+  current: CustomerRiskClassification | null;
+  history: CustomerRiskClassification[];
+}) {
+  return (
+    <div className="ai-risk-related">
+      <h5 className="live-detail__section-title live-detail__section-title--sub">
+        Customer Risk Classification
+      </h5>
+      {!current ? (
+        <p className="live-detail__empty">No customer risk classification stamped.</p>
+      ) : (
+        <div className="ai-panel__result ai-risk-card ai-risk-card--history">
+          <div className="ai-panel__risk-badges">
+            <span className={`ai-risk-badge ai-risk-badge--${current.risk_band.toLowerCase()}`}>
+              Customer Risk Band: {current.risk_band}
+            </span>
+            <span className="ai-risk-badge ai-risk-badge--score">
+              Risk Score: {current.risk_score}
+            </span>
+          </div>
+          <p>{current.summary}</p>
+          <p className="ai-panel__meta">Recent rejection counts from evidence:</p>
+          <ul className="ai-panel__list">
+            {current.evidence_used.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+          <p className="ai-panel__meta">{current.recommendation}</p>
+        </div>
+      )}
+      {history.length > 0 && (
+        <p className="ai-panel__meta">History entries: {history.length}</p>
+      )}
+    </div>
+  );
+}
+
+function BatchRiskView({
+  current,
+  history,
+}: {
+  current: BatchRiskClassification | null;
+  history: BatchRiskClassification[];
+}) {
+  return (
+    <div className="ai-risk-related">
+      <h5 className="live-detail__section-title live-detail__section-title--sub">
+        Batch Risk Classification
+      </h5>
+      {!current ? (
+        <p className="live-detail__empty">No batch risk classification stamped.</p>
+      ) : (
+        <div className="ai-panel__result ai-risk-card ai-risk-card--history">
+          <div className="ai-panel__risk-badges">
+            <span className={`ai-risk-badge ai-risk-badge--${current.risk_band.toLowerCase()}`}>
+              Batch Risk Band: {current.risk_band}
+            </span>
+            <span className="ai-risk-badge ai-risk-badge--score">
+              Risk Score: {current.risk_score}
+            </span>
+          </div>
+          <p>{current.summary}</p>
+          <p className="ai-panel__meta">Validation findings</p>
+          {current.validation_findings.length === 0 ? (
+            <p className="live-detail__empty">No validation findings listed.</p>
+          ) : (
+            <ul className="ai-panel__list">
+              {current.validation_findings.map((item, idx) => (
+                <li key={idx}>{item}</li>
+              ))}
+            </ul>
+          )}
+          <p className="ai-panel__meta">{current.recommendation}</p>
+        </div>
+      )}
+      {history.length > 0 && (
+        <p className="ai-panel__meta">History entries: {history.length}</p>
+      )}
+    </div>
+  );
+}
+
 export function LivePaymentSearch() {
   const [ledger, setLedger] = useState<PaymentLedgerView | null>(null);
   const [query, setQuery] = useState<string>("");
@@ -343,6 +609,11 @@ export function LivePaymentSearch() {
               Search live ledger payments by payment ID, trace number,
               individual ID, individual name, or batch key.
             </p>
+            <p className="table__note">
+              AI risk classification uses deterministic ledger evidence, demo
+              customer history, and available CCD validation findings. It does
+              not determine payment status, credit risk, or fraud risk.
+            </p>
           </div>
           <div className="live-ledger__actions">
             {ledger && (
@@ -390,6 +661,7 @@ export function LivePaymentSearch() {
                 <th>Individual name</th>
                 <th>Individual ID</th>
                 <th>Batch key</th>
+                <th>Risk</th>
                 <th className="table__num">Amount</th>
                 <th>Status</th>
                 <th>Latest evidence</th>
@@ -399,20 +671,23 @@ export function LivePaymentSearch() {
             <tbody>
               {payments.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="table__empty">
+                  <td colSpan={10} className="table__empty">
                     {EMPTY_STATE_MESSAGE}
                   </td>
                 </tr>
               )}
               {payments.length > 0 && results.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="table__empty">
+                  <td colSpan={10} className="table__empty">
                     No payments match your search.
                   </td>
                 </tr>
               )}
               {results.map((payment) => (
-                <tr key={payment.payment_id}>
+                <tr
+                  key={payment.payment_id}
+                  className={paymentRiskRowClass(payment)}
+                >
                   <td className="table__mono">{payment.payment_id}</td>
                   <td className="table__mono">{payment.trace_number}</td>
                   <td>{payment.individual_name}</td>
@@ -420,6 +695,28 @@ export function LivePaymentSearch() {
                     {payment.individual_id_number}
                   </td>
                   <td className="table__mono">{payment.batch_key}</td>
+                  <td>
+                    {payment.current_risk_classification ? (
+                      <div className="risk-cell">
+                        <span
+                          className={
+                            "ai-risk-badge ai-risk-badge--" +
+                            payment.current_risk_classification.risk_band.toLowerCase()
+                          }
+                        >
+                          {payment.current_risk_classification.risk_band}
+                        </span>
+                        <div className="risk-cell__meta">
+                          {payment.current_risk_classification.risk_score}/100
+                        </div>
+                        <div className="risk-cell__meta">
+                          Confidence {payment.current_risk_classification.clearing_confidence} · {confidencePercentFromBand(payment.current_risk_classification.clearing_confidence)}%
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="table__subtle">N/A</span>
+                    )}
+                  </td>
                   <td className="table__num">
                     {formatDollars(payment.amount_cents)}
                   </td>
@@ -443,6 +740,10 @@ export function LivePaymentSearch() {
             </tbody>
           </table>
         </div>
+        <p className="table__note">
+          Clearing confidence is an operational AI confidence score, not
+          payment-level clearing evidence.
+        </p>
       </section>
 
       {selected && (

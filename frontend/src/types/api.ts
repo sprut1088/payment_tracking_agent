@@ -252,6 +252,12 @@ export interface LedgerPayment {
   current_status: LedgerPaymentStatus;
   status_history: LedgerPaymentStatusEvent[];
   evidence: LedgerPaymentEvidence[];
+  current_risk_classification: RiskClassification | null;
+  risk_classification_history: RiskClassification[];
+  current_customer_risk_classification: CustomerRiskClassification | null;
+  customer_risk_classification_history: CustomerRiskClassification[];
+  current_batch_risk_classification: BatchRiskClassification | null;
+  batch_risk_classification_history: BatchRiskClassification[];
 }
 
 export interface PaymentLedgerView {
@@ -273,3 +279,78 @@ export interface AIExplanationResponse {
 }
 
 export type ExplanationPreset = "operations" | "customer_safe" | "executive";
+
+export type RiskBand = "LOW" | "MEDIUM" | "HIGH";
+
+export type ClearingConfidence = "LOW" | "MEDIUM" | "HIGH";
+
+export type RiskClassificationTrigger =
+  | "CCD_UPLOAD"
+  | "SETTLEMENT_OR_SCHEME_REJECT"
+  | "NACHA_RETURN";
+
+export interface RiskClassification {
+  trigger: RiskClassificationTrigger;
+  risk_score: number;
+  risk_band: RiskBand;
+  clearing_confidence: ClearingConfidence;
+  clearing_confidence_note: string;
+  summary: string;
+  risk_drivers: string[];
+  evidence_used: string[];
+  recommendation: string;
+  prior_prediction: PriorPredictionOutcome | null;
+  provider: string;
+  model: string;
+  classified_at: string;
+}
+
+export type OutcomeAlignment =
+  | "RISK_RAISED_BEFORE_REJECTION"
+  | "UNEXPECTED_REJECTION"
+  | "EXPECTED_REJECTION"
+  | "NOT_APPLICABLE";
+
+export interface PriorPredictionOutcome {
+  prior_risk_score: number | null;
+  prior_risk_band: RiskBand | null;
+  prior_clearing_confidence: ClearingConfidence | null;
+  actual_outcome_status: LedgerPaymentStatus;
+  outcome_alignment: OutcomeAlignment;
+  narrative: string;
+}
+
+export interface CustomerRiskClassification {
+  customer_id: string;
+  customer_name: string;
+  risk_score: number;
+  risk_band: RiskBand;
+  confidence_score: number;
+  classification_trigger: string;
+  summary: string;
+  risk_drivers: string[];
+  evidence_used: string[];
+  limitations: string[];
+  recommendation: string;
+  classified_at: string;
+  provider: string;
+  model: string;
+}
+
+export interface BatchRiskClassification {
+  batch_key: string;
+  source_file: string;
+  risk_score: number;
+  risk_band: RiskBand;
+  confidence_score: number;
+  classification_trigger: string;
+  summary: string;
+  risk_drivers: string[];
+  validation_findings: string[];
+  evidence_used: string[];
+  limitations: string[];
+  recommendation: string;
+  classified_at: string;
+  provider: string;
+  model: string;
+}

@@ -13,6 +13,12 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from payment_tracking_agent.models.ai_risk import (
+    BatchRiskClassification,
+    CustomerRiskClassification,
+    RiskClassification,
+)
+
 
 class PaymentStatus(str, Enum):
     """SME-confirmed business-facing payment statuses."""
@@ -56,6 +62,16 @@ class Payment(BaseModel):
     current_status: PaymentStatus
     status_history: list[PaymentStatusEvent] = Field(default_factory=list)
     evidence: list[PaymentEvidence] = Field(default_factory=list)
+    current_risk_classification: RiskClassification | None = None
+    risk_classification_history: list[RiskClassification] = Field(default_factory=list)
+    current_customer_risk_classification: CustomerRiskClassification | None = None
+    customer_risk_classification_history: list[CustomerRiskClassification] = Field(
+        default_factory=list
+    )
+    current_batch_risk_classification: BatchRiskClassification | None = None
+    batch_risk_classification_history: list[BatchRiskClassification] = Field(
+        default_factory=list
+    )
 
 
 class PaymentLedgerView(BaseModel):

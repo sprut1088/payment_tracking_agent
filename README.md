@@ -497,3 +497,58 @@ Payment Search offers three explanation presets alongside the `Generate AI expla
 
 AI explanations are generated on demand only. Claude does not determine payment status. Preset selection changes only Claude's tone and audience, never the deterministic ledger status or evidence.
 
+## AI Payment Risk Classification
+
+The platform now stamps three AI risk-classification scopes from deterministic evidence:
+
+- Payment risk classification
+- Customer risk classification
+- Batch risk classification
+
+There is no on-demand risk endpoint. Stamps are applied during lifecycle processing and displayed inline in live views.
+
+- `CCD_UPLOAD` — stamped after CCD scan creates the payment.
+- `SETTLEMENT_OR_SCHEME_REJECT` — stamped after settlement summary or scheme-reject evidence is applied.
+- `NACHA_RETURN` — stamped after a return file matches the payment; captures prior prediction vs actual outcome with `prior_risk_score`, `prior_risk_band`, `prior_clearing_confidence`, `actual_outcome_status`, and `outcome_alignment`.
+
+CCD upload behavior is intentionally constrained:
+
+- CCD_UPLOAD payment risk uses customer historical rejection trend + batch validation quality.
+- CCD_UPLOAD payment risk must not use "SENT TO SCHEME only", missing settlement evidence, missing return evidence, or normal lifecycle uncertainty as risk drivers.
+
+Customer risk classification uses demo historical rejection trend:
+
+- last 7/30/90 day rejection counts
+- common rejection reason codes
+- latest rejection date
+- open rejected payments
+
+Batch risk classification uses available CCD parse/syntax findings:
+
+- file parsed successfully
+- payment count / accepted count
+- parser errors and validation findings
+- bank-side syntax validation result
+
+Batch caveat:
+
+- Batch risk is based on available CCD validation checks. Full FedACH/NACHA syntax correction workflow is planned as a future enhancement.
+
+Data model exposure in live ledger records:
+
+- Payment: `current_risk_classification`, `risk_classification_history`
+- Customer: `current_customer_risk_classification`, `customer_risk_classification_history`
+- Batch: `current_batch_risk_classification`, `batch_risk_classification_history`
+
+Guardrails:
+
+- Risk means **operational payment-follow-up risk** — the uncertainty about whether the payment needs further follow-up, correction, or resubmission.
+- It is **not** credit risk and **not** fraud risk.
+- The AI never determines payment status. The deterministic ledger remains authoritative.
+- `clearing_confidence` is **AI operational confidence only. Not payment-level clearing evidence.**
+- Settlement summary remains summary-level evidence only and never implies payment-level clearing.
+- Classifications are stamped from deterministic ledger evidence, demo customer history, and available CCD validation findings.
+- Uses the same `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, and `PAYMENT_AGENT_USE_SYSTEM_CERTS` configuration as the AI explanation endpoint.
+- When `ANTHROPIC_API_KEY` is unset or Claude fails, the ledger stamps a **deterministic fallback classification** so the lifecycle never crashes and every payment still has a stamp for the demo. Fallback stamps are tagged `provider: fallback`, `model: deterministic`.
+- No database persistence is implemented yet.
+

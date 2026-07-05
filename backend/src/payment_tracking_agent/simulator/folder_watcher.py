@@ -21,6 +21,12 @@ from pathlib import Path
 
 from payment_tracking_agent.config import Settings, settings as default_settings
 from payment_tracking_agent.ledger.store import PaymentLedger, get_payment_ledger
+from payment_tracking_agent.models.ai_risk import (
+    BatchRiskClassification,
+    CustomerRiskClassification,
+    RiskClassification,
+    RiskClassificationTrigger,
+)
 from payment_tracking_agent.models.demo_flow import (
     BatchIntake,
     BatchIntakeStatus,
@@ -53,6 +59,14 @@ from payment_tracking_agent.simulator.scenario_state import (
     ScenarioStateStore,
     get_scenario_state,
 )
+from payment_tracking_agent.services.batch_validation import (
+    BatchValidationSummary,
+    summarize_ccd,
+)
+from payment_tracking_agent.services.customer_history import (
+    CustomerHistoryStore,
+    get_customer_history_store,
+)
 
 
 class FolderWatcher:
@@ -63,10 +77,108 @@ class FolderWatcher:
         settings: Settings | None = None,
         store: ScenarioStateStore | None = None,
         ledger: PaymentLedger | None = None,
+        risk_service: "AIRiskClassificationService | None" = None,
+        customer_history: CustomerHistoryStore | None = None,
     ) -> None:
         self._settings = settings or default_settings
         self._store = store or get_scenario_state()
         self._ledger = ledger or get_payment_ledger()
+        self._risk_service = risk_service
+        self._customer_history = customer_history or get_customer_history_store()
+
+    def _get_risk_service(self) -> "AIRiskClassificationService":
+        if self._risk_service is None:
+            # Import locally to avoid a circular import at module load.
+            from payment_tracking_agent.agents.ai_risk import get_ai_risk_service
+
+            self._risk_service = get_ai_risk_service()
+        return self._risk_service
+
+    def _stamp_risk_classification(
+        self,
+        payment_id: str,
+        trigger: RiskClassificationTrigger,
+        *,
+        customer_classification: CustomerRiskClassification,
+        batch_classification: BatchRiskClassification,
+        now: datetime,
+    ) -> None:
+        """Stamp an AI risk classification onto the payment.
+
+        Called after the deterministic ledger has already been updated. If
+        the AI service is unavailable or fails, a deterministic fallback
+        classification is stamped so the demo always has a stamp. Never
+        mutates payment status, status history, or evidence.
+        """
+        payment = self._ledger.get_payment(payment_id)
+        if payment is None:
+            return
+        prior = payment.current_risk_classification
+        service = self._get_risk_service()
+        classification = service.classify_payment(
+            payment,
+            trigger,
+            customer_classification=customer_classification,
+            batch_classification=batch_classification,
+            prior_classification=prior,
+            now=now,
+        )
+        self._ledger.set_risk_classification(payment_id, classification)
+
+    def _open_rejected_for_customer(self, customer_id: str) -> int:
+        open_statuses = {
+            PaymentStatus.REJECTED_BY_SCHEME,
+            PaymentStatus.REJECTED_BY_BENEFICIARY_BANK,
+        }
+        return sum(
+            1
+            for p in self._ledger.list_payments()
+            if p.individual_id_number == customer_id and p.current_status in open_statuses
+        )
+
+    def _classify_customer_risk(
+        self,
+        customer_id: str,
+        customer_name: str,
+        now: datetime,
+    ) -> CustomerRiskClassification:
+        open_rejected = self._open_rejected_for_customer(customer_id)
+        summary = self._customer_history.summary(
+            customer_id,
+            customer_name=customer_name,
+            now=now,
+            open_rejected_payments=open_rejected,
+        )
+        service = self._get_risk_service()
+        return service.classify_customer(summary, now=now)
+
+    def _stamp_customer_batch_payment_risk(
+        self,
+        payment_id: str,
+        trigger: RiskClassificationTrigger,
+        *,
+        batch_classification: BatchRiskClassification,
+        now: datetime,
+    ) -> None:
+        payment = self._ledger.get_payment(payment_id)
+        if payment is None:
+            return
+        customer_classification = self._classify_customer_risk(
+            payment.individual_id_number,
+            payment.individual_name,
+            now,
+        )
+        self._ledger.set_customer_risk_classification(
+            payment_id, customer_classification
+        )
+        self._ledger.set_batch_risk_classification(payment_id, batch_classification)
+        self._stamp_risk_classification(
+            payment_id,
+            trigger,
+            customer_classification=customer_classification,
+            batch_classification=batch_classification,
+            now=now,
+        )
 
     @property
     def config_view(self) -> DemoFlowConfigView:
@@ -244,6 +356,16 @@ class FolderWatcher:
         if not parsed.entries:
             return []
 
+        batch_summary: BatchValidationSummary = summarize_ccd(
+            batch_key=batch_key,
+            source_file=file.filename,
+            parsed=parsed,
+        )
+        batch_classification = self._get_risk_service().classify_batch(
+            batch_summary,
+            now=now,
+        )
+
         status = (
             PaymentStatus.SENT_TO_SCHEME
             if parsed.syntax_valid
@@ -259,7 +381,15 @@ class FolderWatcher:
         payments: list[Payment] = []
         for index, entry in enumerate(parsed.entries, start=1):
             payments.append(self._build_payment(batch_key, file, entry, index, status, source, summary, now))
-        return self._ledger.add_payments(payments)
+        added = self._ledger.add_payments(payments)
+        for payment in added:
+            self._stamp_customer_batch_payment_risk(
+                payment.payment_id,
+                RiskClassificationTrigger.CCD_UPLOAD,
+                batch_classification=batch_classification,
+                now=now,
+            )
+        return added
 
     @staticmethod
     def _build_payment(
@@ -326,12 +456,34 @@ class FolderWatcher:
                     summary=self._scheme_reject_summary(record),
                     recorded_at=now,
                 )
-                self._ledger.append_status(
+                updated = self._ledger.append_status(
                     payment.payment_id,
                     PaymentStatus.REJECTED_BY_SCHEME,
                     evidence,
                     at=now,
                 )
+                if updated is not None:
+                    batch_summary = BatchValidationSummary(
+                        batch_key=batch_key,
+                        source_file=payment.source_file,
+                        file_parsed=True,
+                        payment_count=len(self._ledger.list_by_batch(batch_key)),
+                        accepted_count=len(self._ledger.list_by_batch(batch_key)),
+                        syntax_valid=True,
+                        validation_findings=[
+                            "Scheme reject evidence indicates downstream batch/payment validation failure."
+                        ],
+                    )
+                    batch_classification = self._get_risk_service().classify_batch(
+                        batch_summary,
+                        now=now,
+                    )
+                    self._stamp_customer_batch_payment_risk(
+                        payment.payment_id,
+                        RiskClassificationTrigger.SETTLEMENT_OR_SCHEME_REJECT,
+                        batch_classification=batch_classification,
+                        now=now,
+                    )
 
     def _apply_settlement_summary(
         self, batch_key: str, file: DetectedFile, now: datetime
@@ -349,12 +501,31 @@ class FolderWatcher:
                 summary=summary,
                 recorded_at=now,
             )
-            self._ledger.append_status(
+            updated = self._ledger.append_status(
                 payment.payment_id,
                 PaymentStatus.WITH_BENEFICIARY_BANK,
                 evidence,
                 at=now,
             )
+            if updated is not None:
+                batch_summary = BatchValidationSummary(
+                    batch_key=batch_key,
+                    source_file=payment.source_file,
+                    file_parsed=True,
+                    payment_count=len(self._ledger.list_by_batch(batch_key)),
+                    accepted_count=len(self._ledger.list_by_batch(batch_key)),
+                    syntax_valid=True,
+                )
+                batch_classification = self._get_risk_service().classify_batch(
+                    batch_summary,
+                    now=now,
+                )
+                self._stamp_customer_batch_payment_risk(
+                    payment.payment_id,
+                    RiskClassificationTrigger.SETTLEMENT_OR_SCHEME_REJECT,
+                    batch_classification=batch_classification,
+                    now=now,
+                )
 
     @staticmethod
     def _scheme_reject_summary(record: SchemeRejectRecord) -> str:
@@ -390,12 +561,34 @@ class FolderWatcher:
                     summary=self._return_evidence_summary(file.filename, addenda),
                     recorded_at=now,
                 )
-                self._ledger.append_status(
+                updated = self._ledger.append_status(
                     payment.payment_id,
                     PaymentStatus.REJECTED_BY_BENEFICIARY_BANK,
                     evidence,
                     at=now,
                 )
+                if updated is not None:
+                    batch_summary = BatchValidationSummary(
+                        batch_key=batch_key,
+                        source_file=payment.source_file,
+                        file_parsed=True,
+                        payment_count=len(self._ledger.list_by_batch(batch_key)),
+                        accepted_count=len(self._ledger.list_by_batch(batch_key)),
+                        syntax_valid=True,
+                        validation_findings=[
+                            "Beneficiary-bank return evidence indicates actual adverse outcome."
+                        ],
+                    )
+                    batch_classification = self._get_risk_service().classify_batch(
+                        batch_summary,
+                        now=now,
+                    )
+                    self._stamp_customer_batch_payment_risk(
+                        payment.payment_id,
+                        RiskClassificationTrigger.NACHA_RETURN,
+                        batch_classification=batch_classification,
+                        now=now,
+                    )
 
     @staticmethod
     def _return_evidence_summary(

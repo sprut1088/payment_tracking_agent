@@ -1,0 +1,117 @@
+{
+  "generated_note": "Demo customer historical rejection fixture. Not production data. Ages are computed relative to the demo current time.",
+  "customers": [
+    {
+      "customer_id": "CUST00000000001",
+      "customer_name": "ACME SUPPLY",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000002",
+      "customer_name": "NORTHRIDGE LOG",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000003",
+      "customer_name": "BLUEWATER LTD",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000004",
+      "customer_name": "SUMMIT GROUP",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000005",
+      "customer_name": "VENDOR05",
+      "rejections": [
+        {
+          "occurred_at": "2026-05-14T13:20:00Z",
+          "status": "REJECTED_BY_BENEFICIARY_BANK",
+          "reason_code": "R03",
+          "reason_message": "No account on file at receiving DFI"
+        },
+        {
+          "occurred_at": "2026-06-19T09:05:00Z",
+          "status": "REJECTED_BY_SCHEME",
+          "reason_code": "SCH01",
+          "reason_message": "Receiving DFI validation issue"
+        }
+      ]
+    },
+    {
+      "customer_id": "CUST00000000006",
+      "customer_name": "ORION TECH",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000007",
+      "customer_name": "PIONEER DIST",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000008",
+      "customer_name": "MAPLE PRODUCTS",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000009",
+      "customer_name": "HORIZON MFG",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000010",
+      "customer_name": "EVEREST PARTS",
+      "rejections": [
+        {
+          "occurred_at": "2026-06-29T14:15:00Z",
+          "status": "REJECTED_BY_BENEFICIARY_BANK",
+          "reason_code": "R01",
+          "reason_message": "Insufficient funds at receiving DFI"
+        },
+        {
+          "occurred_at": "2026-07-01T08:40:00Z",
+          "status": "REJECTED_BY_BENEFICIARY_BANK",
+          "reason_code": "R01",
+          "reason_message": "Insufficient funds at receiving DFI"
+        },
+        {
+          "occurred_at": "2026-07-02T10:10:00Z",
+          "status": "REJECTED_BY_BENEFICIARY_BANK",
+          "reason_code": "R01",
+          "reason_message": "Insufficient funds at receiving DFI"
+        }
+      ]
+    },
+    {
+      "customer_id": "CUST00000000011",
+      "customer_name": "RIVERSTONE CO",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000012",
+      "customer_name": "WESTFIELD SRV",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000013",
+      "customer_name": "ATLANTIC TRAD",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000014",
+      "customer_name": "GREENLINE LLC",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000015",
+      "customer_name": "STERLING OPS",
+      "rejections": []
+    },
+    {
+      "customer_id": "CUST00000000016",
+      "customer_name": "CROWN SYSTEMS",
+      "rejections": []
+    }
+  ]
+}

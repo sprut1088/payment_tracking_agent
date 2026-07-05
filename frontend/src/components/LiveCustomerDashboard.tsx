@@ -50,24 +50,37 @@ export function LiveCustomerDashboard() {
   const payments = ledger?.payments ?? [];
   const groups = useMemo(() => groupByCustomer(payments), [payments]);
   const totalCounts = useMemo(() => countByStatus(payments), [payments]);
+  const customerRows = useMemo(
+    () =>
+      groups.map((group) => ({
+        ...group,
+        customerRisk:
+          group.payments.find((p) => p.current_customer_risk_classification)
+            ?.current_customer_risk_classification ?? null,
+      })),
+    [groups],
+  );
 
   useEffect(() => {
-    if (groups.length === 0) {
+    if (customerRows.length === 0) {
       if (selectedKey !== "") setSelectedKey("");
       return;
     }
-    const first = customerKey(groups[0].individualId, groups[0].individualName);
+    const first = customerKey(
+      customerRows[0].individualId,
+      customerRows[0].individualName,
+    );
     if (
-      !groups.some(
+      !customerRows.some(
         (g) => customerKey(g.individualId, g.individualName) === selectedKey,
       )
     ) {
       setSelectedKey(first);
     }
-  }, [groups, selectedKey]);
+  }, [customerRows, selectedKey]);
 
   const activeGroup =
-    groups.find(
+    customerRows.find(
       (g) => customerKey(g.individualId, g.individualName) === selectedKey,
     ) ?? null;
   const activePayments = activeGroup
@@ -114,85 +127,146 @@ export function LiveCustomerDashboard() {
         ))}
       </div>
 
-      <div className="customer-grid">
-        {groups.map((group) => {
-          const key = customerKey(group.individualId, group.individualName);
-          return (
-            <button
-              type="button"
-              key={key}
-              className={
-                "customer-card" +
-                (selectedKey === key ? " customer-card--active" : "")
-              }
-              onClick={() => setSelectedKey(key)}
-            >
-              <div className="customer-card__name">{group.individualName}</div>
-              <div className="customer-card__id">{group.individualId}</div>
-              <div className="customer-card__metrics">
-                <span>{group.payments.length} total</span>
-                <span className="text-info">
-                  {group.counts["SENT TO SCHEME"]} sent to scheme
-                </span>
-                <span className="text-warn">
-                  {group.counts["WITH BENEFICIARY BANK"]} with beneficiary bank
-                </span>
-                <span className="text-danger">
-                  {group.counts["REJECTED BY SCHEME"]} rejected by scheme
-                </span>
-                <span className="text-danger-2">
-                  {group.counts["REJECTED BY BENEFICIARY BANK"]} rejected by
-                  beneficiary bank
-                </span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      <p className="table__note">
+        AI risk classification uses deterministic ledger evidence, demo
+        customer history, and available CCD validation findings. It does not
+        determine payment status, credit risk, or fraud risk.
+      </p>
 
       <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
-              <th>Individual ID</th>
-              <th>Individual name</th>
-              <th>Payment ID</th>
-              <th>Trace number</th>
-              <th>Batch key</th>
-              <th className="table__num">Amount</th>
-              <th>Current status</th>
-              <th>Latest evidence</th>
+              <th>Customer ID</th>
+              <th>Customer Name</th>
+              <th>Customer Risk Band</th>
+              <th>Risk Score</th>
+              <th>Confidence Score</th>
+              <th>Recent rejection counts</th>
+              <th>Summary</th>
+              <th>Recommendation</th>
+              <th>Status Counts</th>
+              <th className="table__action">Context</th>
             </tr>
           </thead>
           <tbody>
-            {activePayments.length === 0 && (
+            {customerRows.length === 0 && (
               <tr>
-                <td colSpan={8} className="table__empty">
+                <td colSpan={10} className="table__empty">
                   {EMPTY_STATE_MESSAGE}
                 </td>
               </tr>
             )}
-            {activePayments.map((payment) => (
-              <tr key={payment.payment_id}>
-                <td className="table__mono">{payment.individual_id_number}</td>
-                <td>{payment.individual_name}</td>
-                <td className="table__mono">{payment.payment_id}</td>
-                <td className="table__mono">{payment.trace_number}</td>
-                <td className="table__mono">{payment.batch_key}</td>
-                <td className="table__num">
-                  {formatDollars(payment.amount_cents)}
+            {customerRows.map((customer) => {
+              const key = customerKey(customer.individualId, customer.individualName);
+              return (
+              <tr
+                key={key}
+                className={selectedKey === key ? "table__row-selected" : ""}
+              >
+                <td className="table__mono">{customer.individualId}</td>
+                <td>{customer.individualName}</td>
+                <td>
+                  {customer.customerRisk ? (
+                    <span
+                      className={
+                        "ai-risk-badge ai-risk-badge--" +
+                        customer.customerRisk.risk_band.toLowerCase()
+                      }
+                    >
+                      {customer.customerRisk.risk_band}
+                    </span>
+                  ) : (
+                    <span className="table__subtle">N/A</span>
+                  )}
                 </td>
                 <td>
-                  <StatusBadge status={payment.current_status} size="sm" />
+                  {customer.customerRisk
+                    ? `${customer.customerRisk.risk_score}/100`
+                    : "N/A"}
+                </td>
+                <td>
+                  {customer.customerRisk
+                    ? `${customer.customerRisk.confidence_score}/100`
+                    : "N/A"}
                 </td>
                 <td className="live-ledger__evidence">
-                  {latestEvidenceSummary(payment)}
+                  {customer.customerRisk
+                    ? customer.customerRisk.evidence_used.find((item) =>
+                        item.toLowerCase().includes("rejection counts"),
+                      ) ??
+                      "No count summary"
+                    : "N/A"}
+                </td>
+                <td className="live-ledger__evidence">
+                  {customer.customerRisk
+                    ? customer.customerRisk.summary
+                    : "N/A"}
+                </td>
+                <td className="live-ledger__evidence">
+                  {customer.customerRisk
+                    ? customer.customerRisk.recommendation
+                    : "N/A"}
+                </td>
+                <td className="live-ledger__evidence">
+                  {customer.counts["WITH BANK"]} with bank · {customer.counts["SENT TO SCHEME"]} sent to scheme · {customer.counts["WITH BENEFICIARY BANK"]} with beneficiary bank · {customer.counts["REJECTED BY SCHEME"]} rejected by scheme · {customer.counts["REJECTED BY BENEFICIARY BANK"]} rejected by beneficiary bank
+                </td>
+                <td className="table__action">
+                  <button
+                    type="button"
+                    className="button button--link"
+                    onClick={() => setSelectedKey(key)}
+                  >
+                    Payments
+                  </button>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>
+
+      <section className="live-detail__section">
+        <h3 className="live-detail__section-title">
+          Customer Payment Context {activeGroup ? `- ${activeGroup.individualName}` : ""}
+        </h3>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Payment ID</th>
+                <th>Trace Number</th>
+                <th>Batch Key</th>
+                <th className="table__num">Amount</th>
+                <th>Status</th>
+                <th>Latest Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activePayments.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="table__empty">
+                    Select a customer to view payment context.
+                  </td>
+                </tr>
+              )}
+              {activePayments.map((payment) => (
+                <tr key={payment.payment_id}>
+                  <td className="table__mono">{payment.payment_id}</td>
+                  <td className="table__mono">{payment.trace_number}</td>
+                  <td className="table__mono">{payment.batch_key}</td>
+                  <td className="table__num">{formatDollars(payment.amount_cents)}</td>
+                  <td>
+                    <StatusBadge status={payment.current_status} size="sm" />
+                  </td>
+                  <td className="live-ledger__evidence">{latestEvidenceSummary(payment)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <p className="table__note">
         Customer-level view groups by parsed individual ID and name from CCD
         entry-detail records. No payment-level clearing is claimed from
