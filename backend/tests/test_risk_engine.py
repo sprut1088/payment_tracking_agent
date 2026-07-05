@@ -73,6 +73,7 @@ def test_single_clean_payment_is_low() -> None:
 def test_one_recent_return_triggers_medium() -> None:
     history = [
         _h("CUST-02", PaymentStatus.WITH_BENEFICIARY_BANK_PENDING, 10.0, "T001"),
+        _h("CUST-02", PaymentStatus.WITH_BENEFICIARY_BANK_PENDING, 7.0, "T003"),  # extra clean
         _h("CUST-02", PaymentStatus.REJECTED_BY_RETURN_FILE, 2.0, "T002"),  # 2 days ago
     ]
     level, reason = compute_customer_risk("CUST-02", history)
@@ -104,16 +105,28 @@ def test_two_returns_triggers_high() -> None:
     assert level == "HIGH"
 
 
-def test_rejection_rate_50pct_triggers_high() -> None:
-    # 2 rejected out of 4 = 50 %
+def test_rejection_rate_above_50pct_triggers_high() -> None:
+    # 3 rejected out of 4 = 75 % — strictly above 50 % → HIGH
     history = [
         _h("CUST-05", PaymentStatus.WITH_BENEFICIARY_BANK_PENDING, 60.0, "T001"),
-        _h("CUST-05", PaymentStatus.WITH_BENEFICIARY_BANK_PENDING, 55.0, "T002"),
-        _h("CUST-05", PaymentStatus.WITH_BANK_VALIDATION_FAILED, 45.0, "T003"),
-        _h("CUST-05", PaymentStatus.REJECTED_BY_SETTLEMENT, 10.0, "T004"),
+        _h("CUST-05", PaymentStatus.WITH_BANK_VALIDATION_FAILED, 45.0, "T002"),
+        _h("CUST-05", PaymentStatus.REJECTED_BY_SETTLEMENT, 30.0, "T003"),
+        _h("CUST-05", PaymentStatus.REJECTED_BY_RETURN_FILE, 10.0, "T004"),
     ]
     level, _ = compute_customer_risk("CUST-05", history)
     assert level == "HIGH"
+
+
+def test_rejection_rate_exactly_50pct_is_medium() -> None:
+    # 2 rejected out of 4 = exactly 50 % — not above 50 % → MEDIUM
+    history = [
+        _h("CUST-07", PaymentStatus.WITH_BENEFICIARY_BANK_PENDING, 60.0, "T001"),
+        _h("CUST-07", PaymentStatus.WITH_BENEFICIARY_BANK_PENDING, 55.0, "T002"),
+        _h("CUST-07", PaymentStatus.WITH_BANK_VALIDATION_FAILED, 45.0, "T003"),
+        _h("CUST-07", PaymentStatus.REJECTED_BY_SETTLEMENT, 50.0, "T004"),
+    ]
+    level, _ = compute_customer_risk("CUST-07", history)
+    assert level == "MEDIUM"
 
 
 def test_two_rejections_in_30_days_triggers_high() -> None:
