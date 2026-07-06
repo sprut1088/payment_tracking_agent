@@ -211,7 +211,7 @@ export function CcdReviewPanel({ items, onReviewed }: CcdReviewPanelProps) {
     <section className="card">
       <header className="card__header">
         <h2 className="card__title">
-          Review queue
+          Review Queue
           <span className="badge badge--warning" style={{ marginLeft: "0.5rem" }}>
             {items.length} awaiting review
           </span>

@@ -129,6 +129,14 @@ def _customer_key(entry: EntryDetailRecord) -> str:
     return entry.individual_id_number or entry.individual_name or entry.trace_number
 
 
+def compute_signals(
+    customer_id: str,
+    history: list[tuple[EntryDetailRecord, datetime]],
+) -> CustomerRiskSignals:
+    """Public alias for signal extraction — used by pre-submission service."""
+    return _compute_signals(customer_id, history)
+
+
 def _compute_signals(
     customer_id: str,
     history: list[tuple[EntryDetailRecord, datetime]],
@@ -143,7 +151,7 @@ def _compute_signals(
 
     customer_history = [
         (entry, ts) for entry, ts in history
-        if _customer_key(entry) == customer_id
+        if ts is not None and _customer_key(entry) == customer_id
     ]
     total = len(customer_history)
 

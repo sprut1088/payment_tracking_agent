@@ -12,6 +12,7 @@ export type InternalStatus =
   | "WITH_BANK_UPLOADED"
   | "WITH_BANK_VALIDATING"
   | "WITH_BANK_READY_FOR_SCHEME"
+  | "WITH_BANK_VALIDATION_FAILED"
   | "WITH_SCHEME_SUBMITTED"
   | "WITH_BENEFICIARY_BANK_PENDING"
   | "REJECTED_BY_SCHEME_FILE"
@@ -272,6 +273,60 @@ export interface DropFileInfo {
 export interface DropStatusResponse {
   files: DropFileInfo[];
   scanned_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Pre-submission risk validation types
+// ---------------------------------------------------------------------------
+
+export type PreSubmissionAction = "PROCEED" | "REVIEW" | "HOLD";
+
+export interface PreSubmissionPaymentAssessment {
+  trace_number: string;
+  customer_id: string;
+  customer_name: string;
+  amount: number;
+  receiving_dfi: string;
+  account_masked: string;
+  risk_level: RiskLevel;
+  risk_reason: string;
+  historical_total_payments: number;
+  historical_rejections: number;
+  historical_returns: number;
+  rejection_rate_pct: number;
+  rejections_last_30d: number;
+  action: PreSubmissionAction;
+  ai_recommendation: string;
+}
+
+export interface PreSubmissionCustomerSummary {
+  customer_id: string;
+  customer_name: string;
+  payment_count: number;
+  total_amount: number;
+  risk_level: RiskLevel;
+  risk_reason: string;
+  action: PreSubmissionAction;
+  ai_recommendation: string;
+  trace_numbers: string[];
+}
+
+export interface BatchPreSubmissionResult {
+  upload_id: string;
+  file_name: string;
+  validated_at: string;
+  batch_risk_level: RiskLevel;
+  batch_risk_reason: string;
+  total_payments: number;
+  high_risk_count: number;
+  medium_risk_count: number;
+  low_risk_count: number;
+  hold_count: number;
+  review_count: number;
+  proceed_count: number;
+  payment_assessments: PreSubmissionPaymentAssessment[];
+  customer_summaries: PreSubmissionCustomerSummary[];
+  ai_batch_summary: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PTA_",
         env_file=str(_BACKEND_ROOT / ".env"),  # absolute path — works regardless of CWD
+        env_file_encoding="utf-8",  # explicit — avoids cp1252/utf-8 mismatch across platforms
         extra="ignore",
     )
 
@@ -23,6 +24,14 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     # Directory where raw uploaded CCD files are saved (created on first upload)
     upload_dir: str = "uploaded_files/ccd"
+
+    # ---------------------------------------------------------------------------
+    # Persistence — JSON snapshot of the in-memory ledger
+    # Set persist_interval_seconds > 0 to enable periodic disk flush.
+    # Set to 0 to disable auto-persistence (data lost on restart).
+    # ---------------------------------------------------------------------------
+    data_dir: str = str(_BACKEND_ROOT / "database_json")
+    persist_interval_seconds: int = 30  # flush dirty store every 30 s
 
     # ---------------------------------------------------------------------------
     # LLM settings
@@ -66,7 +75,7 @@ class Settings(BaseSettings):
 
     # Scheduler intervals (seconds)
     return_scan_interval_seconds: int = 30
-    scheme_push_interval_seconds: int = 30
+    scheme_push_interval_seconds: int = 5
     # Auto-simulation disabled by default — payments only advance to WITH BENEFICIARY BANK
     # when an actual settlement file is received (via Check Settlement or drop/settlement/input/).
     # Set to a positive value to re-enable the auto-simulator.
@@ -85,7 +94,7 @@ class Settings(BaseSettings):
     ccd_scan_processed_dir: str = str(_BACKEND_ROOT / "drop" / "ccd" / "processed")
     ccd_scan_under_review_dir: str = str(_BACKEND_ROOT / "drop" / "ccd" / "under-review")
     ccd_scan_error_dir: str = str(_BACKEND_ROOT / "drop" / "ccd" / "error")
-    ccd_scan_interval_seconds: int = 30
+    ccd_scan_interval_seconds: int = 15
 
     # Local-folder demo flow (Prompt 04).
     # Required folder layout under demo_flow_root:

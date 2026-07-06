@@ -73,7 +73,7 @@ export function CustomerDashboard({ onSelectPayment, demoMode, refreshKey }: Cus
   return (
     <section className="card">
       <header className="card__header">
-        <h2 className="card__title">Customer dashboard</h2>
+        <h2 className="card__title">Customer Dashboard</h2>
         <p className="card__subtitle">
           {demoMode
             ? "Demo Mode ON — predefined SME-aligned mock data."
@@ -88,17 +88,31 @@ export function CustomerDashboard({ onSelectPayment, demoMode, refreshKey }: Cus
       )}
 
       <div className="customer-grid">
-        {customers.map((c) => (
+        {customers.map((c) => {
+          const riskLevel = (c.riskLevel ?? "LOW").toUpperCase();
+          const riskModifier =
+            riskLevel === "HIGH" ? " customer-card--risk-high"
+            : riskLevel === "MEDIUM" ? " customer-card--risk-medium"
+            : " customer-card--risk-low";
+          return (
           <button
             type="button"
             key={c.customerId}
             className={
-              "customer-card" +
+              "customer-card" + riskModifier +
               (selected === c.customerId ? " customer-card--active" : "")
             }
             onClick={() => setSelected(c.customerId)}
           >
-            <div className="customer-card__name">{c.customerName}</div>
+            <div className="customer-card__header-row">
+              <div className="customer-card__name">{c.customerName}</div>
+              <span
+                className={`risk risk--${riskLevel.toLowerCase()}`}
+                data-tooltip={c.riskReason ?? undefined}
+              >
+                {riskLevel}
+              </span>
+            </div>
             <div className="customer-card__id">{c.customerId}</div>
             <div className="customer-card__metrics">
               <span>{c.totalPayments} Total</span>
@@ -115,7 +129,8 @@ export function CustomerDashboard({ onSelectPayment, demoMode, refreshKey }: Cus
               {c.lastRejectionDate && <> · last {c.lastRejectionDate}</>}
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       <div className="table-wrap">

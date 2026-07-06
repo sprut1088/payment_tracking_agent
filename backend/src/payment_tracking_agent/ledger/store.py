@@ -2,18 +2,34 @@
 
 All uploaded CCD files, their parsed records, and processed return files are
 held in module-level dicts for the lifetime of the process.
-The ``clear()`` function resets all state for tests.
+
+Persistence
+-----------
+Call ``persist()`` to snapshot the full store to ``data/store.json``.
+Call ``load_from_disk()`` at application startup to restore the previous state.
+A background scheduler job calls ``persist_if_dirty()`` every N seconds so data
+survives restarts without manual intervention.
+The ``clear()`` function resets all state (and deletes the snapshot file) for
+tests and the demo-flow "Reset" button.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from payment_tracking_agent.models.payment import EntryDetailRecord, PaymentStatus, UploadRecord
+from payment_tracking_agent.models.pre_submission import BatchPreSubmissionResult
 from payment_tracking_agent.models.return_file import ProcessedReturnFile
 from payment_tracking_agent.models.settlement import ProcessedSettlementFile
 
+logger = logging.getLogger(__name__)
+
 _MAX_EVENTS = 200  # cap so memory doesn't grow unbounded
+_MAX_DROP_LOG = 500
 
 # ---------------------------------------------------------------------------
 # Upload store
@@ -25,6 +41,7 @@ _uploads: dict[str, UploadRecord] = {}
 def save_upload(record: UploadRecord) -> None:
     """Persist an upload record keyed by its upload_id."""
     _uploads[record.upload_id] = record
+    _mark_dirty()
 
 
 def get_upload(upload_id: str) -> UploadRecord | None:
@@ -57,6 +74,8 @@ def list_all_entries_with_timestamps() -> list[tuple[EntryDetailRecord, datetime
     """
     pairs: list[tuple[EntryDetailRecord, datetime]] = []
     for record in _uploads.values():
+        if record.uploaded_at is None:  # guard against incomplete restore from disk
+            continue
         for batch in record.parsed.batches:
             for entry in batch.entries:
                 pairs.append((entry, record.uploaded_at))
@@ -175,6 +194,8 @@ def advance_submitted_to_beneficiary_bank() -> int:
                     entry.status = PaymentStatus.WITH_BENEFICIARY_BANK_PENDING
                     entry.business_status = PaymentStatus.WITH_BENEFICIARY_BANK_PENDING.business_status
                     advanced += 1
+    if advanced:
+        _mark_dirty()
     return advanced
 
 
@@ -207,6 +228,7 @@ _return_files: dict[str, ProcessedReturnFile] = {}
 
 def save_return_file(record: ProcessedReturnFile) -> None:
     _return_files[record.return_file_id] = record
+    _mark_dirty()
 
 
 def get_return_file(return_file_id: str) -> ProcessedReturnFile | None:
@@ -227,6 +249,7 @@ _settlement_files: dict[str, ProcessedSettlementFile] = {}
 
 def save_settlement_file(record: ProcessedSettlementFile) -> None:
     _settlement_files[record.settlement_file_id] = record
+    _mark_dirty()
 
 
 def get_settlement_file(settlement_file_id: str) -> ProcessedSettlementFile | None:
@@ -281,15 +304,49 @@ def list_drop_files() -> list[dict]:
 # Test helpers
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Pre-submission validation store
+# ---------------------------------------------------------------------------
+
+_pre_submission_results: dict[str, BatchPreSubmissionResult] = {}
+
+
+def save_pre_submission_result(result: BatchPreSubmissionResult) -> None:
+    """Persist a pre-submission validation result keyed by upload_id."""
+    _pre_submission_results[result.upload_id] = result
+    _mark_dirty()
+
+
+def get_pre_submission_result(upload_id: str) -> BatchPreSubmissionResult | None:
+    """Return the pre-submission validation result for a given upload, or None."""
+    return _pre_submission_results.get(upload_id)
+
+
+def list_pre_submission_results() -> list[BatchPreSubmissionResult]:
+    """Return all pre-submission results, newest first."""
+    return sorted(
+        _pre_submission_results.values(),
+        key=lambda r: r.validated_at,
+        reverse=True,
+    )
+
+
 def clear() -> None:
-    """Remove all records (used in tests)."""
+    """Remove all records (used in tests and demo reset)."""
     from payment_tracking_agent.risk.engine import invalidate_risk_cache  # noqa: PLC0415
     _uploads.clear()
     _return_files.clear()
     _settlement_files.clear()
+    _pre_submission_results.clear()
     _events.clear()
     _drop_file_log.clear()
     invalidate_risk_cache()
+    # Also delete the on-disk snapshot so the reset is complete
+    try:
+        _snapshot_path().unlink(missing_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
+    _mark_dirty()
 
 
 # ---------------------------------------------------------------------------
@@ -318,4 +375,122 @@ def append_event(agent: str, message: str) -> None:
 def list_events(limit: int = _MAX_EVENTS) -> list[dict]:
     """Return the most recent *limit* events, newest first."""
     return list(reversed(_events[-limit:]))
+
+
+# ---------------------------------------------------------------------------
+# Persistence — atomic JSON snapshot to database_json/store.json
+# ---------------------------------------------------------------------------
+
+_dirty: bool = False
+
+
+def _mark_dirty() -> None:
+    global _dirty
+    _dirty = True
+
+
+def _snapshot_path() -> Path:
+    from payment_tracking_agent.config import settings  # noqa: PLC0415
+    p = Path(settings.data_dir) / "store.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def persist() -> None:
+    """Atomically serialize the full store to database_json/store.json.
+
+    Writes to a .tmp file first then renames so a crash mid-write never
+    leaves a corrupt snapshot.
+    """
+    global _dirty
+    snapshot = {
+        "uploads": {k: v.model_dump(mode="json") for k, v in _uploads.items()},
+        "return_files": {k: v.model_dump(mode="json") for k, v in _return_files.items()},
+        "settlement_files": {k: v.model_dump(mode="json") for k, v in _settlement_files.items()},
+        "pre_submission_results": {
+            k: v.model_dump(mode="json") for k, v in _pre_submission_results.items()
+        },
+        "events": _events[-_MAX_EVENTS:],
+        "drop_file_log": _drop_file_log[-_MAX_DROP_LOG:],
+    }
+    path = _snapshot_path()
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
+        tmp.replace(path)
+        _dirty = False
+        logger.debug("Store persisted → %s", path)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Store persist failed: %s", exc)
+
+
+def persist_if_dirty() -> None:
+    """Persist only when the store has unsaved changes."""
+    if _dirty:
+        persist()
+
+
+def load_from_disk() -> None:
+    """Restore store state from database_json/store.json at startup.
+
+    Silently skips if the file does not exist or cannot be read.
+    Logs a warning for individual records that fail validation so a single
+    corrupt entry doesn't block the whole restore.
+    """
+    path = _snapshot_path()
+    if not path.exists():
+        logger.info("No store snapshot found at %s — starting empty.", path)
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not read store snapshot %s: %s", path, exc)
+        return
+
+    restored = {"uploads": 0, "returns": 0, "settlements": 0, "pre_sub": 0, "events": 0}
+
+    for k, v in data.get("uploads", {}).items():
+        try:
+            _uploads[k] = UploadRecord.model_validate(v)
+            restored["uploads"] += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Store load: skipping upload %s — %s", k, exc)
+
+    for k, v in data.get("return_files", {}).items():
+        try:
+            _return_files[k] = ProcessedReturnFile.model_validate(v)
+            restored["returns"] += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Store load: skipping return_file %s — %s", k, exc)
+
+    for k, v in data.get("settlement_files", {}).items():
+        try:
+            _settlement_files[k] = ProcessedSettlementFile.model_validate(v)
+            restored["settlements"] += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Store load: skipping settlement_file %s — %s", k, exc)
+
+    for k, v in data.get("pre_submission_results", {}).items():
+        try:
+            _pre_submission_results[k] = BatchPreSubmissionResult.model_validate(v)
+            restored["pre_sub"] += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Store load: skipping pre_submission %s — %s", k, exc)
+
+    for evt in data.get("events", []):
+        if isinstance(evt, dict):
+            _events.append(evt)
+    restored["events"] = len(data.get("events", []))
+
+    for entry in data.get("drop_file_log", []):
+        if isinstance(entry, dict):
+            _drop_file_log.append(entry)
+
+    logger.info(
+        "Store restored from %s — uploads=%d returns=%d settlements=%d "
+        "pre_sub=%d events=%d",
+        path,
+        restored["uploads"], restored["returns"], restored["settlements"],
+        restored["pre_sub"], restored["events"],
+    )
 

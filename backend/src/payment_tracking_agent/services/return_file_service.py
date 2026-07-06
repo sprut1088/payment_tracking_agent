@@ -75,6 +75,8 @@ def process_return_file(file_name: str, content: bytes) -> ProcessedReturnFile:
                 return_description=reason_desc,
                 individual_name=entry.individual_name,
                 amount=round(entry.amount_cents / 100.0, 2),
+                receiving_dfi=entry_record.receiving_dfi,
+                account_masked=entry_record.dfi_account_number_masked,
             )
             store.update_payment_return_info(
                 upload_id=upload_record.upload_id,

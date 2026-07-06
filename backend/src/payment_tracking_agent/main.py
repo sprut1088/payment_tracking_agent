@@ -17,10 +17,15 @@ from payment_tracking_agent.config import settings
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the background scheduler on startup; stop it on shutdown."""
+    from payment_tracking_agent.ledger import store
     from payment_tracking_agent.scheduler.scheduler import start_scheduler, stop_scheduler
 
+    # Restore persisted payment ledger before accepting requests
+    store.load_from_disk()
     start_scheduler()
     yield
+    # Flush any unsaved changes before the process exits
+    store.persist()
     stop_scheduler()
 
 

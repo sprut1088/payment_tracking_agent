@@ -138,7 +138,7 @@ export function LocalFolderDemoControls({
   return (
     <section className="card">
       <header className="card__header">
-        <h2 className="card__title">Local folder demo flow controls</h2>
+        <h2 className="card__title">Local Folder Demo Flow Controls</h2>
         <p className="card__subtitle">
           Drive backend endpoints for folder setup and phased scanning: CCD,
           settlement/scheme reject, then returns. This panel shows file-evidence
@@ -169,6 +169,7 @@ export function LocalFolderDemoControls({
             void runAction("CCD scan complete", async () => {
               const scan = await api.scanDemoFlowCcd();
               setLastScan(scan);
+              await api.triggerDropScanCcd();
               onRefresh();
             })
           }
@@ -183,6 +184,7 @@ export function LocalFolderDemoControls({
             void runAction("Settlement check complete", async () => {
               const scan = await api.checkDemoFlowSettlement();
               setLastScan(scan);
+              await api.triggerDropScanSettlement();
               onRefresh();
             })
           }
@@ -197,6 +199,7 @@ export function LocalFolderDemoControls({
             void runAction("Returns check complete", async () => {
               const scan = await api.checkDemoFlowReturns();
               setLastScan(scan);
+              await api.triggerDropScanReturns();
               onRefresh();
             })
           }

@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from payment_tracking_agent import __version__
 from payment_tracking_agent.ledger import store
 from payment_tracking_agent.models.payment import PaymentStatus
+from payment_tracking_agent.models.pre_submission import BatchPreSubmissionResult
 from payment_tracking_agent.models.transaction_status import (
     CustomerSummaryItem,
     FileTransactionsResponse,
@@ -30,6 +31,111 @@ from payment_tracking_agent.services import return_file_service, settlement_serv
 from payment_tracking_agent.services.upload_service import UploadValidationError
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Pre-submission validation endpoints
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/api/v1/uploads/{upload_id}/pre-submission",
+    response_model=BatchPreSubmissionResult,
+    tags=["Pre-Submission"],
+)
+def get_pre_submission_result(upload_id: str) -> BatchPreSubmissionResult:
+    """Return the pre-submission risk validation result for a CCD upload.
+
+    This result is generated automatically when the scheme_pusher advances
+    payments from WITH_BANK_UPLOADED to WITH_SCHEME_SUBMITTED.  It contains
+    per-payment PROCEED / REVIEW / HOLD recommendations based on the customer's
+    historical payment signals and AI analysis.
+    """
+    result = store.get_pre_submission_result(upload_id)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No pre-submission validation result found for upload '{upload_id}'.",
+        )
+    return result
+
+
+@router.get(
+    "/api/v1/pre-submission",
+    response_model=list[BatchPreSubmissionResult],
+    tags=["Pre-Submission"],
+)
+def list_pre_submission_results() -> list[BatchPreSubmissionResult]:
+    """Return all stored pre-submission validation results, newest first."""
+    return store.list_pre_submission_results()
+
+
+@router.post(
+    "/api/v1/uploads/{upload_id}/release-hold",
+    tags=["Pre-Submission"],
+)
+def release_held_batch(upload_id: str) -> dict:
+    """Override the pre-submission hold — advance all WITH_BANK_VALIDATION_FAILED
+    payments in this upload to WITH_SCHEME_SUBMITTED (operator approves the risk).
+    """
+    record = store.get_upload(upload_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Upload '{upload_id}' not found.")
+
+    released = 0
+    for batch in record.parsed.batches:
+        for entry in batch.entries:
+            if entry.status == PaymentStatus.WITH_BANK_VALIDATION_FAILED:
+                entry.status = PaymentStatus.WITH_SCHEME_SUBMITTED
+                entry.business_status = PaymentStatus.WITH_SCHEME_SUBMITTED.business_status
+                released += 1
+
+    if released:
+        store._mark_dirty()  # noqa: SLF001
+        store.append_event(
+            "BeforePaymentSubmissionAgent",
+            f"Hold released — {record.file_name}: operator approved {released} held "
+            "payment(s). Batch advanced to SENT TO SCHEME.",
+        )
+        from payment_tracking_agent.risk.engine import invalidate_risk_cache  # noqa: PLC0415
+        invalidate_risk_cache()
+
+    return {"upload_id": upload_id, "released": released}
+
+
+@router.post(
+    "/api/v1/uploads/{upload_id}/reject-hold",
+    tags=["Pre-Submission"],
+)
+def reject_held_batch(upload_id: str) -> dict:
+    """Permanently reject a held batch — mark all WITH_BANK_VALIDATION_FAILED
+    payments as REJECTED_BY_SETTLEMENT so they do not retry scheme submission.
+    """
+    record = store.get_upload(upload_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Upload '{upload_id}' not found.")
+
+    rejected = 0
+    for batch in record.parsed.batches:
+        for entry in batch.entries:
+            if entry.status == PaymentStatus.WITH_BANK_VALIDATION_FAILED:
+                entry.status = PaymentStatus.REJECTED_BY_SETTLEMENT
+                entry.business_status = PaymentStatus.REJECTED_BY_SETTLEMENT.business_status
+                entry.corrective_action = (
+                    "Operator rejected this batch due to pre-submission risk flags. "
+                    "Correct account details and re-upload."
+                )
+                rejected += 1
+
+    if rejected:
+        store._mark_dirty()  # noqa: SLF001
+        store.append_event(
+            "BeforePaymentSubmissionAgent",
+            f"Batch rejected — {record.file_name}: operator rejected {rejected} held "
+            "payment(s). Payments marked REJECTED BY SCHEME. Correct and re-upload.",
+        )
+        from payment_tracking_agent.risk.engine import invalidate_risk_cache  # noqa: PLC0415
+        invalidate_risk_cache()
+
+    return {"upload_id": upload_id, "rejected": rejected}
 
 
 @router.get("/health", tags=["health"])
@@ -476,6 +582,47 @@ def list_settlement_files() -> list[dict]:
         }
         for r in store.list_settlement_files()
     ]
+
+
+# ---------------------------------------------------------------------------
+# On-demand drop-folder triggers (mirrors what the scheduler runs automatically)
+# ---------------------------------------------------------------------------
+
+@router.post("/api/v1/drop/scan-ccd", tags=["Drop Folder"])
+def drop_scan_ccd() -> dict:
+    """Manually trigger the scheduler's CCD scan of drop/ccd/input/.
+
+    Processes any files currently waiting in the drop folder exactly as the
+    scheduler would — valid files create payments and are archived, syntax-error
+    files move to drop/ccd/under-review/ with a corrections JSON.
+    """
+    from payment_tracking_agent.scheduler.scheduler import _job_scan_ccd_files  # noqa: PLC0415
+    _job_scan_ccd_files()
+    return {"status": "triggered", "folder": "drop/ccd/input/"}
+
+
+@router.post("/api/v1/drop/scan-settlement", tags=["Drop Folder"])
+def drop_scan_settlement() -> dict:
+    """Manually trigger the scheduler's settlement scan of drop/settlement/input/.
+
+    Processes scheme-reject and settlement summary files, advances matched
+    payments to REJECTED BY SCHEME or WITH BENEFICIARY BANK as appropriate.
+    """
+    from payment_tracking_agent.scheduler.scheduler import _job_scan_settlement_files  # noqa: PLC0415
+    _job_scan_settlement_files()
+    return {"status": "triggered", "folder": "drop/settlement/input/"}
+
+
+@router.post("/api/v1/drop/scan-returns", tags=["Drop Folder"])
+def drop_scan_returns() -> dict:
+    """Manually trigger the scheduler's return-file scan of drop/returns/input/.
+
+    Parses NACHA return files, matches by original trace number, and advances
+    matched payments to REJECTED BY BENEFICIARY BANK.
+    """
+    from payment_tracking_agent.scheduler.scheduler import _job_scan_return_files  # noqa: PLC0415
+    _job_scan_return_files()
+    return {"status": "triggered", "folder": "drop/returns/input/"}
 
 
 @router.get("/api/v1/settlements/{settlement_file_id}", tags=["Settlement Files"])

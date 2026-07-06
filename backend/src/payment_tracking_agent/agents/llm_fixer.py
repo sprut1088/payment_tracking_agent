@@ -32,6 +32,49 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
+def _call_generic_llm(system: str, user: str, max_tokens: int = 300) -> str | None:
+    """Send a free-form system+user prompt to the configured LLM.
+
+    Used by services that need ad-hoc analysis (e.g. unknown return codes)
+    without a structured JSON schema.  Returns the raw text response, or
+    ``None`` when no LLM key is configured or the call fails.
+    """
+    _env_anthropic = (
+        os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("PTA_ANTHROPIC_API_KEY")
+    )
+    api_key = settings.llm_api_key or settings.anthropic_api_key or _env_anthropic
+    if not api_key:
+        return None
+    provider = (settings.llm_provider or "openai").lower()
+    model = settings.llm_model
+    try:
+        if provider == "anthropic":
+            from anthropic import Anthropic  # noqa: PLC0415
+            client = Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+            return response.content[0].text.strip() if response.content else None
+        else:
+            from openai import OpenAI  # noqa: PLC0415
+            client = OpenAI(api_key=api_key, base_url=settings.llm_base_url or None)
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            )
+            return (response.choices[0].message.content or "").strip() or None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("_call_generic_llm failed: %s", exc)
+        return None
+
+
 def _salvage_truncated_array(text: str) -> str:
     """Close a JSON array that was cut off mid-stream (max_tokens hit)."""
     last_brace = text.rfind('}')
@@ -276,13 +319,122 @@ _RETURN_EXPLAIN_SYSTEM = """\
 You are an ACH payment operations expert. A NACHA return code has been received.
 Explain what happened in plain language a bank operations user can act on.
 Do NOT invent payment details beyond what is provided.
+
+When vendor payment history is provided, use it to:
+- Identify if the routing number or account number looks like a typo compared to prior successful payments.
+- Suggest the likely correct value if a near-match is found (e.g. "previous successful payments used routing 021000021 — current routing differs by 1 digit").
+- Note recurring patterns if the same vendor has been rejected before.
+
 Respond with a JSON object only — no markdown, no prose.
 The object must contain exactly:
 {
   "customer_message": "<one sentence a bank can send to the originating company explaining why the payment was returned>",
-  "corrective_action": "<one to two sentences describing what the originator should do next>"
+  "corrective_action": "<one to two sentences describing what the originator should do next, citing specific routing/account correction if history suggests a typo>"
 }
 """
+
+
+def _digits_diff(a: str, b: str) -> int:
+    """Count differing characters between two strings of the same length."""
+    if len(a) != len(b):
+        return max(len(a), len(b))
+    return sum(x != y for x, y in zip(a, b))
+
+
+def _build_vendor_history_context(
+    individual_name: str,
+    receiving_dfi: str,
+    account_masked: str,
+) -> str | None:
+    """Build a vendor history context string for the LLM prompt.
+
+    Looks up all past payments for the same vendor name, identifies successful
+    and failed patterns, and flags routing/account number differences that look
+    like typos (differ by 1–2 digits from a previously successful payment).
+
+    Returns None when there is no meaningful history to include.
+    """
+    try:
+        from payment_tracking_agent.ledger import store as _store  # noqa: PLC0415
+        from payment_tracking_agent.models.payment import PaymentStatus  # noqa: PLC0415
+    except Exception:
+        return None
+
+    vendor_name_lower = individual_name.strip().lower()
+    all_entries = _store.list_all_entries()
+    vendor_entries = [
+        e for e in all_entries
+        if e.individual_name.strip().lower() == vendor_name_lower
+    ]
+
+    if len(vendor_entries) <= 1:
+        return None  # only the current payment — no history to compare
+
+    successful_statuses = {
+        PaymentStatus.WITH_BENEFICIARY_BANK_PENDING,
+        PaymentStatus.WITH_SCHEME_SUBMITTED,
+        PaymentStatus.WITH_SCHEME_ACKNOWLEDGED,
+    }
+    rejected_statuses = {
+        PaymentStatus.REJECTED_BY_RETURN_FILE,
+        PaymentStatus.REJECTED_BY_SETTLEMENT,
+    }
+
+    successful = [e for e in vendor_entries if e.status in successful_statuses]
+    rejected   = [e for e in vendor_entries if e.status in rejected_statuses]
+
+    parts: list[str] = []
+
+    # ── Routing number comparison ────────────────────────────────────────
+    past_dfis = list({e.receiving_dfi for e in successful if e.receiving_dfi})
+    typo_candidates = [
+        (dfi, _digits_diff(receiving_dfi, dfi))
+        for dfi in past_dfis
+        if dfi != receiving_dfi and len(dfi) == len(receiving_dfi)
+    ]
+    typo_candidates.sort(key=lambda x: x[1])
+
+    if typo_candidates and typo_candidates[0][1] <= 2:
+        best_dfi, diff = typo_candidates[0]
+        parts.append(
+            f"ROUTING MISMATCH — current routing '{receiving_dfi}' differs by {diff} digit(s) "
+            f"from '{best_dfi}' used in {len(successful)} prior successful payment(s) to this vendor. "
+            "Likely a typo."
+        )
+    elif any(e.receiving_dfi == receiving_dfi for e in successful):
+        parts.append(
+            f"This vendor has {len(successful)} prior successful payment(s) to routing '{receiving_dfi}'."
+        )
+    elif past_dfis:
+        parts.append(
+            f"Prior successful payments to this vendor used routing(s): {', '.join(past_dfis[:3])}. "
+            f"Current payment uses '{receiving_dfi}' — confirm this is correct."
+        )
+
+    # ── Account number suffix comparison (masked — last 4 digits only) ──
+    past_accounts = list({e.dfi_account_number_masked for e in successful if e.dfi_account_number_masked})
+    current_suffix = account_masked[-4:] if len(account_masked) >= 4 else account_masked
+    for past_acct in past_accounts:
+        past_suffix = past_acct[-4:] if len(past_acct) >= 4 else past_acct
+        if past_suffix != current_suffix:
+            diff = _digits_diff(current_suffix, past_suffix)
+            if diff <= 1:
+                parts.append(
+                    f"ACCOUNT MISMATCH — current account ending '{current_suffix}' differs by {diff} "
+                    f"digit from prior successful account ending '{past_suffix}'. Possible typo."
+                )
+                break
+
+    # ── Recurring rejection pattern ──────────────────────────────────────
+    if rejected:
+        past_codes = list({e.return_reason_code for e in rejected if e.return_reason_code})
+        if past_codes:
+            parts.append(
+                f"This vendor has had {len(rejected)} prior rejection(s) with code(s): "
+                f"{', '.join(past_codes)}. Recurring issue — verify account details with vendor."
+            )
+
+    return "\n".join(parts) if parts else None
 
 
 def explain_return_code(
@@ -290,8 +442,15 @@ def explain_return_code(
     return_description: str,
     individual_name: str,
     amount: float,
+    receiving_dfi: str = "",
+    account_masked: str = "",
 ) -> dict[str, str]:
     """Call the LLM to explain a NACHA return reason code and suggest a fix.
+
+    When ``receiving_dfi`` and ``account_masked`` are provided, the function
+    also fetches vendor payment history from the ledger, runs a fuzzy digit
+    comparison against prior successful payments, and passes any typo hints
+    to the LLM so it can suggest a specific correction.
 
     Returns a dict with keys ``customer_message`` and ``corrective_action``.
     Falls back to static text if no LLM key is configured or the call fails.
@@ -325,9 +484,19 @@ def explain_return_code(
     if not api_key:
         return fallback
 
+    # Build vendor history context for typo detection
+    vendor_history = ""
+    if receiving_dfi or account_masked:
+        history_ctx = _build_vendor_history_context(individual_name, receiving_dfi, account_masked)
+        if history_ctx:
+            vendor_history = f"\n\nVendor payment history analysis:\n{history_ctx}"
+
     user_message = (
         f"A NACHA ACH payment of ${amount:.2f} to '{individual_name}' was returned.\n"
-        f"Return code: {return_code} — {return_description}\n\n"
+        f"Return code: {return_code} — {return_description}\n"
+        f"Routing used: {receiving_dfi or 'unknown'}\n"
+        f"Account (masked): {account_masked or 'unknown'}"
+        f"{vendor_history}\n\n"
         "Respond with the JSON object only."
     )
 
@@ -368,3 +537,139 @@ def explain_return_code(
         logger.error("LLM return code explanation failed: %s", exc, exc_info=True)
 
     return fallback
+
+
+# ---------------------------------------------------------------------------
+# Pre-submission risk assessment
+# ---------------------------------------------------------------------------
+
+_PRE_SUBMISSION_SYSTEM = """\
+You are a senior ACH payment risk analyst reviewing payments BEFORE they are
+submitted to the ACH scheme. You are given details about a specific payment
+and its customer's historical payment signals from the bank's memory.
+
+Your job is to recommend one of three actions:
+  PROCEED  — history is clean; submit normally.
+  REVIEW   — submit but flag for close monitoring (medium risk signals).
+  HOLD     — do NOT submit yet; high risk of rejection or return based on history.
+
+Base your decision on the provided signals. Do NOT invent additional history.
+Be specific: cite the signal (e.g. rejection rate, routing mismatch, past R01s)
+that drove your recommendation.
+
+Respond with a JSON object only — no markdown, no prose:
+{
+  "action": "PROCEED" | "REVIEW" | "HOLD",
+  "ai_recommendation": "<2–3 sentences: what signal triggered this and what operator should do>"
+}
+"""
+
+
+def assess_pre_submission_payment(
+    customer_name: str,
+    customer_id: str,
+    amount: float,
+    receiving_dfi: str,
+    account_masked: str,
+    risk_level: str,
+    risk_reason: str,
+    historical_total_payments: int,
+    historical_rejections: int,
+    historical_returns: int,
+    rejection_rate_pct: float,
+    rejections_last_30d: int,
+) -> dict[str, str]:
+    """Call the LLM to assess whether a payment should PROCEED, REVIEW, or HOLD.
+
+    Uses the customer's historical risk signals from the in-memory ledger.
+    Falls back to a deterministic action when no LLM key is configured.
+    """
+    # Deterministic fallback based on risk level
+    _action_map = {"HIGH": "HOLD", "MEDIUM": "REVIEW", "LOW": "PROCEED"}
+    _fallback_action = _action_map.get(risk_level, "PROCEED")
+    fallback = {
+        "action": _fallback_action,
+        "ai_recommendation": (
+            f"Deterministic assessment — {risk_level} risk: {risk_reason} "
+            "No LLM key configured; using rule-based classification."
+        ),
+    }
+
+    _env_anthropic = (
+        os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("PTA_ANTHROPIC_API_KEY")
+    )
+    if not settings.llm_api_key and not settings.anthropic_api_key and not _env_anthropic:
+        return fallback
+
+    provider = (settings.llm_provider or "openai").lower()
+    model = settings.llm_model
+    if provider == "anthropic":
+        api_key = settings.anthropic_api_key or settings.llm_api_key or _env_anthropic
+    else:
+        api_key = settings.llm_api_key or settings.anthropic_api_key or _env_anthropic
+    if not api_key:
+        return fallback
+
+    user_message = (
+        f"Payment to assess before scheme submission:\n"
+        f"  Vendor/customer : {customer_name} (ID: {customer_id})\n"
+        f"  Amount          : ${amount:,.2f}\n"
+        f"  Routing         : {receiving_dfi}\n"
+        f"  Account (masked): {account_masked}\n\n"
+        f"Customer historical signals from bank memory:\n"
+        f"  Total past payments    : {historical_total_payments}\n"
+        f"  Total rejections       : {historical_rejections}\n"
+        f"  Beneficiary-bank returns: {historical_returns}\n"
+        f"  Rejection rate         : {rejection_rate_pct:.1f}%\n"
+        f"  Rejections last 30 days: {rejections_last_30d}\n"
+        f"  Deterministic risk tier: {risk_level} — {risk_reason}\n\n"
+        "Recommend PROCEED, REVIEW, or HOLD. Return JSON only."
+    )
+
+    try:
+        raw_text = ""
+        if provider == "anthropic":
+            from anthropic import Anthropic  # noqa: PLC0415
+            client = Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=300,
+                system=_PRE_SUBMISSION_SYSTEM,
+                messages=[{"role": "user", "content": user_message}],
+            )
+            raw_text = response.content[0].text if response.content else ""
+        else:
+            from openai import OpenAI  # noqa: PLC0415
+            client = OpenAI(api_key=api_key, base_url=settings.llm_base_url or None)
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=300,
+                messages=[
+                    {"role": "system", "content": _PRE_SUBMISSION_SYSTEM},
+                    {"role": "user", "content": user_message},
+                ],
+            )
+            raw_text = response.choices[0].message.content or ""
+
+        raw_text = _strip_code_fences(raw_text)
+        parsed = json.loads(raw_text)
+        if (
+            isinstance(parsed, dict)
+            and parsed.get("action") in {"PROCEED", "REVIEW", "HOLD"}
+            and "ai_recommendation" in parsed
+        ):
+            logger.info(
+                "Pre-submission assessment: customer=%s action=%s",
+                customer_id,
+                parsed["action"],
+            )
+            return {
+                "action": str(parsed["action"]),
+                "ai_recommendation": str(parsed["ai_recommendation"]),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Pre-submission LLM assessment failed: %s", exc, exc_info=True)
+
+    return fallback
+

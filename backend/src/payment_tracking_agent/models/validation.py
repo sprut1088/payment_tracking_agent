@@ -35,6 +35,26 @@ class CorrectedLine(BaseModel):
     explanation: str | None = None  # LLM-generated plain-English description of the change
 
 
+class HistoricalRejectionWarning(BaseModel):
+    """A warning derived from past return/rejection history for a payment entry.
+
+    Generated deterministically at upload time — before the file is sent to
+    the scheme — so operators can fix issues before submission.
+    """
+
+    trace_number: str          # trace number of the entry being flagged
+    individual_name: str       # vendor / beneficiary name
+    account_masked: str        # masked account number of the current entry
+    receiving_dfi: str         # routing of the current entry
+
+    return_code: str           # most recent past return code (e.g. R02)
+    return_description: str    # human-readable NACHA description
+    occurrence_count: int      # how many times this return was seen historically
+    last_seen_trace: str       # trace number of the most recent prior return
+    severity: str              # "HIGH" | "MEDIUM" | "LOW"
+    recommendation: str        # deterministic recommendation text
+
+
 class UploadCCDResponse(BaseModel):
     """Unified response for the CCD upload endpoint.
 
@@ -68,3 +88,8 @@ class UploadCCDResponse(BaseModel):
 
     # Present when is_valid=True
     parsed: ParsedCCDFile | None = None
+
+    # Populated when is_valid=True and historical rejections are found for any entry.
+    # These are deterministic warnings based on past return/rejection data — generated
+    # at upload time so operators can fix issues before the batch is sent to scheme.
+    historical_warnings: list[HistoricalRejectionWarning] = []

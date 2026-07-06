@@ -15,8 +15,10 @@ from payment_tracking_agent.config import settings
 from payment_tracking_agent.ledger import store
 from payment_tracking_agent.validators import nacha_reconstructor
 from payment_tracking_agent.models.payment import UploadRecord
+from payment_tracking_agent.models.payment import ParsedCCDFile as _ParsedCCDFile  # noqa: F401 (used in type hints)
 from payment_tracking_agent.models.validation import (
     CorrectedLine,
+    HistoricalRejectionWarning,
     LineValidationError,
     LLMFixSuggestion,
     UploadCCDResponse,
@@ -88,7 +90,16 @@ def process_ccd_upload(file_name: str, content: bytes) -> UploadCCDResponse:
     line_errors = ccd_validator.validate_lines(raw_text)
 
     if line_errors:
-        return _build_invalid_response(file_name, original_lines, line_errors)
+        # Even with syntax errors, attempt a best-effort parse so we can
+        # run the historical rejection check on whatever records are readable.
+        partial_parsed = None
+        try:
+            partial_parsed = ccd_parser.parse_ccd_bytes(content)
+        except Exception:  # noqa: BLE001
+            pass
+        hist_warnings = _check_historical_rejections(partial_parsed) if partial_parsed else []
+        return _build_invalid_response(file_name, original_lines, line_errors,
+                                       historical_warnings=hist_warnings)
 
     # ------------------------------------------------------------------
     # Step 2: Parse entry detail records
@@ -116,6 +127,21 @@ def process_ccd_upload(file_name: str, content: bytes) -> UploadCCDResponse:
         f"{len(parsed.batches)} batch(es). Status: WITH BANK.",
     )
 
+    # ------------------------------------------------------------------
+    # Step 4: Historical rejection check
+    # ------------------------------------------------------------------
+    historical_warnings = _check_historical_rejections(parsed)
+    if historical_warnings:
+        high = sum(1 for w in historical_warnings if w.severity == "HIGH")
+        medium = sum(1 for w in historical_warnings if w.severity == "MEDIUM")
+        store.append_event(
+            "BeforePaymentSubmissionAgent",
+            f"Historical rejection check \u2014 {file_name}: "
+            f"{len(historical_warnings)} warning(s) found "
+            f"(HIGH={high} MEDIUM={medium}). "
+            "Review before sending to scheme.",
+        )
+
     return UploadCCDResponse(
         is_valid=True,
         file_name=file_name,
@@ -124,6 +150,7 @@ def process_ccd_upload(file_name: str, content: bytes) -> UploadCCDResponse:
         batch_count=len(parsed.batches),
         original_lines=original_lines,
         parsed=parsed,
+        historical_warnings=historical_warnings,
     )
 
 
@@ -131,10 +158,149 @@ def process_ccd_upload(file_name: str, content: bytes) -> UploadCCDResponse:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+# Return codes that indicate a permanent account-level problem — always HIGH.
+_HIGH_SEVERITY_CODES: frozenset[str] = frozenset({
+    "R02",  # Account Closed
+    "R03",  # No Account / Unable to Locate Account
+    "R04",  # Invalid Account Number
+    "R16",  # Account Frozen
+    "R20",  # Non-Transaction Account
+    "R21",  # Invalid Company Identification
+    "R22",  # Invalid Individual ID Number
+    "R23",  # Credit Entry Refused by Receiver
+    "R28",  # Routing Number Check Digit Error
+})
+
+# Return codes that indicate a recurring or compliance problem — always MEDIUM.
+_MEDIUM_SEVERITY_CODES: frozenset[str] = frozenset({
+    "R01",  # Insufficient Funds
+    "R05",  # Unauthorized Debit
+    "R07",  # Authorization Revoked
+    "R08",  # Payment Stopped
+    "R09",  # Uncollected Funds
+    "R10",  # Customer Advises Unauthorized
+    "R29",  # Corporate Customer Advises Not Authorized
+    "R30",  # RDFI Not Participant in Check Truncation Program
+    "R31",  # Permissible Return Entry
+})
+
+
+def _severity_for_code(code: str, occurrence_count: int) -> str:
+    """Return severity for a return code.
+
+    Predefined sets capture known patterns.  For any code NOT in the sets
+    (including future codes we haven't anticipated), severity is escalated
+    automatically based on how many times it has appeared:
+
+      3+ occurrences → HIGH   (recurring unknown problem = treat seriously)
+      2  occurrences → MEDIUM
+      1  occurrence  → LOW    (isolated — could be a one-off)
+
+    This means new NACHA return codes are handled without any code change.
+    """
+    if code in _HIGH_SEVERITY_CODES:
+        return "HIGH"
+    if code in _MEDIUM_SEVERITY_CODES:
+        return "MEDIUM"
+    # Unknown / future code — escalate by frequency
+    if occurrence_count >= 3:
+        return "HIGH"
+    if occurrence_count >= 2:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _check_historical_rejections(
+    parsed: _ParsedCCDFile,
+) -> list[HistoricalRejectionWarning]:
+    """Cross-reference every entry in *parsed* against past return/rejection records.
+
+    For each entry, looks up all historical payments with the same vendor name
+    (``individual_name``) that have a ``return_reason_code`` set.  Groups by
+    return code, counts occurrences, and returns a warning for each unique
+    (entry, return_code) pair that has appeared at least once before.
+
+    Returns warnings ordered: HIGH first, then MEDIUM, then LOW.
+    """
+    from payment_tracking_agent.models.return_file import RETURN_REASON_DESCRIPTIONS  # noqa: PLC0415
+
+    all_entries = store.list_all_entries()
+
+    # Build per-vendor return history:
+    # vendor_name → list of past entries that have a return_reason_code
+    vendor_returns: dict[str, list] = {}
+    for e in all_entries:
+        if e.return_reason_code:
+            key = e.individual_name.strip().lower()
+            vendor_returns.setdefault(key, []).append(e)
+
+    warnings: list[HistoricalRejectionWarning] = []
+
+    for batch in parsed.batches:
+        for entry in batch.entries:
+            vendor_key = entry.individual_name.strip().lower()
+            past = vendor_returns.get(vendor_key, [])
+            if not past:
+                continue
+
+            # Count occurrences per return code
+            code_counts: dict[str, list] = {}
+            for p in past:
+                code_counts.setdefault(p.return_reason_code, []).append(p)
+
+            for code, occurrences in sorted(code_counts.items()):
+                severity = _severity_for_code(code, len(occurrences))
+
+                desc = RETURN_REASON_DESCRIPTIONS.get(code, "Unknown return reason")
+                last = occurrences[-1]
+
+                # Build a specific recommendation based on the code
+                if code in {"R02", "R16"}:
+                    rec = (
+                        f"Account for {entry.individual_name} was previously returned "
+                        f"{code} ({desc}). Verify the account is still active before submission."
+                    )
+                elif code in {"R03", "R04"}:
+                    rec = (
+                        f"Account ****{entry.dfi_account_number_masked[-4:]} for "
+                        f"{entry.individual_name} returned {code} ({desc}) {len(occurrences)} "
+                        "time(s). Confirm the account number and routing with the beneficiary."
+                    )
+                elif code == "R01":
+                    rec = (
+                        f"{entry.individual_name} had {len(occurrences)} insufficient-funds "
+                        "return(s). Consider contacting the beneficiary before re-submission."
+                    )
+                else:
+                    rec = (
+                        f"Prior return {code} ({desc}) found for {entry.individual_name}. "
+                        "Review before sending to scheme."
+                    )
+
+                warnings.append(HistoricalRejectionWarning(
+                    trace_number=entry.trace_number,
+                    individual_name=entry.individual_name,
+                    account_masked=entry.dfi_account_number_masked,
+                    receiving_dfi=entry.receiving_dfi,
+                    return_code=code,
+                    return_description=desc,
+                    occurrence_count=len(occurrences),
+                    last_seen_trace=last.trace_number,
+                    severity=severity,
+                    recommendation=rec,
+                ))
+
+    # Sort: HIGH first, then MEDIUM, then LOW; within tier by occurrence count desc
+    _sev_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    warnings.sort(key=lambda w: (_sev_order.get(w.severity, 9), -w.occurrence_count))
+    return warnings
+
+
 def _build_invalid_response(
     file_name: str,
     original_lines: list[str],
     line_errors: list,
+    historical_warnings: list[HistoricalRejectionWarning] | None = None,
 ) -> UploadCCDResponse:
     """Build the error response: group errors by line, call LLM, build corrected file."""
     # Group by line so we send one batched LLM request
@@ -231,6 +397,7 @@ def _build_invalid_response(
         original_lines=original_lines,
         corrected_lines=corrected_lines,
         corrected_file_content=corrected_file_content,
+        historical_warnings=historical_warnings or [],
     )
 
 

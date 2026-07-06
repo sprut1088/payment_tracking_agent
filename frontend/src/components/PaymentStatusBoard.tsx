@@ -23,7 +23,7 @@ export function PaymentStatusBoard({ state, demoMode = true, underReviewCount = 
   return (
     <section className="card">
       <header className="card__header">
-        <h2 className="card__title">Payment status board</h2>
+        <h2 className="card__title">Payment Status Board</h2>
         <p className="card__subtitle">
           {demoMode
             ? <>Live counts across all batches in this scenario. Totals:{" "}

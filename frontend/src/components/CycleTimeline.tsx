@@ -12,7 +12,7 @@ export function CycleTimeline({ plan, runs, activeCycle }: CycleTimelineProps) {
   return (
     <section className="card">
       <header className="card__header">
-        <h2 className="card__title">Cycle timeline</h2>
+        <h2 className="card__title">Cycle Timeline</h2>
         <p className="card__subtitle">
           Configured cycles for this scenario. Each dot represents one batch
           cycle. This story follows SME-confirmed settlement-summary and reject

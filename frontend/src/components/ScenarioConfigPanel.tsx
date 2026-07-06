@@ -38,7 +38,7 @@ export function ScenarioConfigPanel({
   return (
     <section className="card">
       <header className="card__header">
-        <h2 className="card__title">Scenario configuration</h2>
+        <h2 className="card__title">Scenario Configuration</h2>
         <p className="card__subtitle">
           Choose a scenario and drive the demo cycle by cycle. Times are
           configurable; the platform does not hard-code the three real GMT

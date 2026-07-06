@@ -6,6 +6,7 @@ import type {
   AgentTraceStep,
   BackendPaymentListItem,
   BatchSummary,
+  BusinessStatus,
   CustomerSummary,
   DemoFlowConfig,
   DemoFlowScanResult,
@@ -266,7 +267,17 @@ export function computeFileRiskLevel(rows: PaymentRecord[]): import("../types/ap
   return "LOW";
 }
 
-/** Batch-level risk: derived from the batch's own rejection rate, not individual transaction risk. */
+/** Batch-level risk: combines current rejection rate AND individual payment history risk.
+ *
+ * For a freshly uploaded batch with no rejections yet, the individual riskLevel
+ * on each payment (computed by the backend risk engine from all historical data)
+ * is used as a forward-looking signal:
+ *   - Any HIGH individual risk  → batch shows MEDIUM (likely to fail again)
+ *   - Any MEDIUM individual risk → batch shows MEDIUM
+ *   - Current rejections > 50%  → HIGH
+ *   - Current rejections + HIGH individual risk → HIGH
+ *   - No rejections, no history risk → LOW
+ */
 export function computeBatchRiskLevel(rows: PaymentRecord[]): import("../types/api").RiskLevel {
   if (rows.length === 0) return "LOW";
   const rejected = rows.filter(
@@ -275,8 +286,13 @@ export function computeBatchRiskLevel(rows: PaymentRecord[]): import("../types/a
       r.currentStatus === "REJECTED BY BENEFICIARY BANK",
   ).length;
   const rate = (rejected / rows.length) * 100;
+  const highHistCount   = rows.filter((r) => r.riskLevel === "HIGH").length;
+  const mediumHistCount = rows.filter((r) => r.riskLevel === "MEDIUM").length;
+
   if (rate > 50) return "HIGH";
-  if (rejected > 0) return "MEDIUM";
+  if (rejected > 0) return "MEDIUM";                  // any current rejections → MEDIUM
+  if (highHistCount > 0) return "MEDIUM";             // high historical risk → likely to fail → MEDIUM
+  if (mediumHistCount > 0) return "MEDIUM";           // medium historical risk → MEDIUM
   return "LOW";
 }
 
@@ -288,11 +304,20 @@ export function computeBatchRiskReason(rows: PaymentRecord[]): string {
   ).length;
   const rejected = rejectedByScheme + rejectedByBeneficiary;
   const rate = (rejected / rows.length) * 100;
-  if (rejected === 0)
-    return `Batch rejection rate: 0% — all ${rows.length} payment${rows.length !== 1 ? "s" : ""} clean.`;
-  const parts = [`Batch rejection rate: ${rate.toFixed(1)}% (${rejected}/${rows.length} payments).`];
+  const highHistCount   = rows.filter((r) => r.riskLevel === "HIGH").length;
+  const mediumHistCount = rows.filter((r) => r.riskLevel === "MEDIUM").length;
+
+  const parts: string[] = [];
+  if (rejected > 0)
+    parts.push(`Current rejection rate: ${rate.toFixed(1)}% (${rejected}/${rows.length} payments).`);
   if (rejectedByScheme > 0) parts.push(`${rejectedByScheme} rejected by scheme.`);
   if (rejectedByBeneficiary > 0) parts.push(`${rejectedByBeneficiary} rejected by beneficiary bank.`);
+  if (highHistCount > 0)
+    parts.push(`${highHistCount} payment${highHistCount !== 1 ? "s" : ""} carry HIGH historical risk from prior rejections — likely to fail again.`);
+  if (mediumHistCount > 0)
+    parts.push(`${mediumHistCount} payment${mediumHistCount !== 1 ? "s" : ""} carry MEDIUM historical risk — monitor closely.`);
+  if (parts.length === 0)
+    return `Batch rejection rate: 0% \u2014 all ${rows.length} payment${rows.length !== 1 ? "s" : ""} clean with no elevated historical risk.`;
   return parts.join(" ");
 }
 
@@ -597,6 +622,7 @@ function mapInternalStatus(status: string): PaymentRecord["internalStatus"] {
     "WITH_BANK_UPLOADED",
     "WITH_BANK_VALIDATING",
     "WITH_BANK_READY_FOR_SCHEME",
+    "WITH_BANK_VALIDATION_FAILED",
     "WITH_SCHEME_SUBMITTED",
     "WITH_BENEFICIARY_BANK_PENDING",
     "REJECTED_BY_SCHEME_FILE",
@@ -605,6 +631,40 @@ function mapInternalStatus(status: string): PaymentRecord["internalStatus"] {
   ];
   const match = known.find((s) => s === status);
   return match ?? "WITH_BANK_UPLOADED";
+}
+
+function _defaultCustomerMessage(status: BusinessStatus): string {
+  switch (status) {
+    case "WITH BANK":
+      return "The payment is currently with the bank pending validation and scheme submission. No action from the beneficiary is required at this stage.";
+    case "SENT TO SCHEME":
+      return "The payment has passed bank-side validation and has been submitted to the ACH scheme. It is awaiting scheme processing.";
+    case "WITH BENEFICIARY BANK":
+      return "Settlement summary evidence has been received for this batch. The payment is currently with the beneficiary bank. No return file has been received yet — the payment remains in this status pending any future return evidence.";
+    case "REJECTED BY SCHEME":
+      return "The payment was rejected by the ACH scheme before reaching the beneficiary bank. Bank-side correction is required before resubmission.";
+    case "REJECTED BY BENEFICIARY BANK":
+      return "The payment reached the beneficiary bank but was subsequently returned. Return reason details will be shown once the return file is processed.";
+    default:
+      return "Payment status is being tracked. Refer to the status timeline for the latest evidence.";
+  }
+}
+
+function _defaultRecommendedAction(status: BusinessStatus): string {
+  switch (status) {
+    case "WITH BANK":
+      return "No action required. Payment will be submitted to the scheme after bank-side validation completes.";
+    case "SENT TO SCHEME":
+      return "Await settlement summary evidence or scheme rejection notification. No action required at this time.";
+    case "WITH BENEFICIARY BANK":
+      return "Await beneficiary bank confirmation. If a return file is received, the payment status will update automatically. No payment-level clearing is claimed from settlement summary alone.";
+    case "REJECTED BY SCHEME":
+      return "Review the scheme rejection reason and correct the payment details before resubmission.";
+    case "REJECTED BY BENEFICIARY BANK":
+      return "Review the return reason code and contact the originating company. Correct the underlying issue before retrying.";
+    default:
+      return "Review the payment status and evidence trail for next steps.";
+  }
 }
 
 /** Convert a backend PaymentListItem into a frontend PaymentRecord. */
@@ -617,7 +677,7 @@ function mapBackendPayment(item: BackendPaymentListItem): PaymentRecord {
   return {
     paymentId: `PAY-${item.trace_number}`,
     traceNumber: item.trace_number,
-    batchId: item.batch_number,
+    batchId: item.upload_id,           // unique per uploaded file — avoids collision when multiple files share the same NACHA batch number
     cycleTime: uploadedTime,
     sourceFile: item.file_name,
     companyId: "",
@@ -650,8 +710,8 @@ function mapBackendPayment(item: BackendPaymentListItem): PaymentRecord {
           },
         ]
       : [],
-    recommendedAction: item.corrective_action ?? undefined,
-    customerFriendlyMessage: item.return_customer_message ?? undefined,
+    recommendedAction: item.corrective_action ?? _defaultRecommendedAction(currentStatus),
+    customerFriendlyMessage: item.return_customer_message ?? _defaultCustomerMessage(currentStatus),
   };
 }
 
@@ -659,7 +719,8 @@ function mapBackendPayment(item: BackendPaymentListItem): PaymentRecord {
 // Short-TTL payment list cache — shared across all live-mode page fetches.
 // Prevents redundant backend round-trips when navigating between pages.
 // ---------------------------------------------------------------------------
-const PAYMENTS_CACHE_TTL_MS = 8_000;
+const PAYMENTS_CACHE_TTL_MS = 4_000;   // 4 s — short enough to reflect scheme-push quickly
+let _cacheGeneration = 0;              // incremented on invalidate so stale flights discard themselves
 let _paymentsCache: { data: PaymentRecord[]; ts: number } | null = null;
 let _paymentsFlight: Promise<PaymentRecord[]> | null = null;
 
@@ -673,10 +734,14 @@ async function fetchLivePayments(): Promise<PaymentRecord[]> {
     return _paymentsCache.data;
   }
   if (_paymentsFlight) return _paymentsFlight;
+  const gen = _cacheGeneration;
   _paymentsFlight = requestJson<BackendPaymentListItem[]>("/api/v1/payments")
     .then((items) => {
       const data = items.map(mapBackendPayment);
-      _paymentsCache = { data, ts: Date.now() };
+      // Only cache if invalidatePaymentsCache() was not called while in-flight
+      if (gen === _cacheGeneration) {
+        _paymentsCache = { data, ts: Date.now() };
+      }
       _paymentsFlight = null;
       return data;
     })
@@ -689,6 +754,7 @@ async function fetchLivePayments(): Promise<PaymentRecord[]> {
 
 /** Invalidate the payment cache (call after uploads or status-changing actions). */
 export function invalidatePaymentsCache(): void {
+  _cacheGeneration++;          // invalidates any in-flight response
   _paymentsCache = null;
   _paymentsFlight = null;
 }
@@ -813,6 +879,22 @@ export const api = {
     return requestJson<UnderReviewItem[]>("/api/demo-flow/under-review");
   },
 
+  listPreSubmissionResults(): Promise<import("../types/api").BatchPreSubmissionResult[]> {
+    return requestJson("/api/v1/pre-submission");
+  },
+
+  getPreSubmissionResult(uploadId: string): Promise<import("../types/api").BatchPreSubmissionResult | null> {
+    return requestJson<import("../types/api").BatchPreSubmissionResult>(`/api/v1/uploads/${uploadId}/pre-submission`).catch(() => null);
+  },
+
+  releaseHold(uploadId: string): Promise<{ released: number }> {
+    return requestJson(`/api/v1/uploads/${uploadId}/release-hold`, { method: "POST" });
+  },
+
+  rejectHold(uploadId: string): Promise<{ rejected: number }> {
+    return requestJson(`/api/v1/uploads/${uploadId}/reject-hold`, { method: "POST" });
+  },
+
   acceptCorrection(payload: {
     batch_id: string;
     file_name: string;
@@ -836,6 +918,20 @@ export const api = {
   // -------------------------------------------------------------------------
   // Live backend calls — used when Demo Mode is OFF
   // -------------------------------------------------------------------------
+
+  // ---- On-demand drop-folder triggers ----------------------------------------
+
+  triggerDropScanCcd(): Promise<void> {
+    return requestNoContent("/api/v1/drop/scan-ccd", { method: "POST" });
+  },
+
+  triggerDropScanSettlement(): Promise<void> {
+    return requestNoContent("/api/v1/drop/scan-settlement", { method: "POST" });
+  },
+
+  triggerDropScanReturns(): Promise<void> {
+    return requestNoContent("/api/v1/drop/scan-returns", { method: "POST" });
+  },
 
   async listPaymentsLive(): Promise<PaymentRecord[]> {
     return fetchLivePayments();

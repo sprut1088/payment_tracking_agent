@@ -88,7 +88,9 @@ def scan_ccd(watcher: FolderWatcher = Depends(get_folder_watcher)) -> ScanCCDRes
     uploads: list[CcdUploadOutcome] = []
     cfg = watcher.config_view
     processed_dir = cfg.processed_dir
-    under_review_ccd = cfg.under_review_dir / "ccd"
+    # Use the same under-review directory as the scheduler so all syntax-error
+    # files land in one place regardless of which path processed them.
+    under_review_ccd = Path(settings.ccd_scan_under_review_dir)
 
     for detected in scan.new_files:
         if detected.kind != FileKind.CCD:
@@ -138,6 +140,24 @@ def scan_ccd(watcher: FolderWatcher = Depends(get_folder_watcher)) -> ScanCCDRes
                 entry_count=result.entry_count,
                 batch_count=result.batch_count,
             ))
+            # Run pre-submission risk validation immediately so risk is
+            # visible on the Batch Dashboard before the scheme_pusher fires.
+            try:
+                from payment_tracking_agent.services import pre_submission_service  # noqa: PLC0415
+                upload_rec = store.get_upload(result.upload_id)
+                if upload_rec:
+                    validation = pre_submission_service.validate_batch_before_submission(upload_rec)
+                    store.save_pre_submission_result(validation)
+                    store.append_event(
+                        "BeforePaymentSubmissionAgent",
+                        f"Pre-submission risk — {file_name}: "
+                        f"{validation.ai_batch_summary} "
+                        f"(batch risk={validation.batch_risk_level} "
+                        f"hold={validation.hold_count} review={validation.review_count} "
+                        f"proceed={validation.proceed_count})",
+                    )
+            except Exception as _ps_exc:  # noqa: BLE001
+                logger.warning("scan-ccd: pre-submission validation failed for %s: %s", file_name, _ps_exc)
             # Valid — archive to processed/ccd/
             _archive_file(file_path, processed_dir)
         else:
@@ -160,7 +180,10 @@ def scan_ccd(watcher: FolderWatcher = Depends(get_folder_watcher)) -> ScanCCDRes
                     "errors": errors_list,
                     "corrected_file_content": result.corrected_file_content,
                     "corrected_lines": corrected_lines_data,
-                }, indent=2, ensure_ascii=False))
+                    "historical_warnings": [
+                        w.model_dump() for w in result.historical_warnings
+                    ] if result.historical_warnings else [],
+                }, indent=2, ensure_ascii=False), encoding="utf-8")
                 logger.info("scan-ccd: moved %s to under-review", file_name)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("scan-ccd: could not move %s to under-review: %s", file_path, exc)
@@ -288,7 +311,7 @@ def get_under_review(
             orig_file = orig_candidates[0]
             try:
                 original_content = orig_file.read_text(encoding="ascii", errors="replace")
-                corrections_data: dict = json.loads(corrections_file.read_text(encoding="utf-8"))
+                corrections_data: dict = json.loads(corrections_file.read_text(encoding="utf-8", errors="replace"))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("under-review: could not read %s: %s", orig_file, exc)
                 continue
@@ -314,7 +337,7 @@ def get_under_review(
                 continue
             seen.add(stem)
             try:
-                original_content = orig_file.read_text(encoding="ascii", errors="replace")
+                original_content = orig_file.read_text(encoding="utf-8", errors="replace")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("under-review: could not read %s: %s", orig_file, exc)
                 continue

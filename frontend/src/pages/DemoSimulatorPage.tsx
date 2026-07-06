@@ -5,9 +5,10 @@ import { CycleTimeline } from "../components/CycleTimeline";
 import { LocalFolderDemoControls } from "../components/LocalFolderDemoControls";
 import { PaymentStatusBoard } from "../components/PaymentStatusBoard";
 import { ScenarioConfigPanel } from "../components/ScenarioConfigPanel";
+import { StatusBadge } from "../components/StatusBadge";
 import type { AgentTraceStep, BusinessStatus, DemoFlowConfig, DemoFlowState, DropFileInfo, EventLogEntry, PaymentRecord, SimulationState, UploadSummary } from "../types/api";
 
-const LIVE_POLL_INTERVAL_S = 10;
+const LIVE_POLL_INTERVAL_S = 5;
 
 interface DemoSimulatorPageProps {
   demoMode: boolean;
@@ -136,16 +137,18 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
               : "Demo Mode OFF: backend local-folder controls are active below. Dashboards remain mocked for presentation."}
           </p>
         </div>
-        <div className="clock">
-          <div className="clock__label">Current sim time</div>
-          <div className="clock__value">{state.currentSimTime}</div>
-          {state.activeCycle && (
-            <div className="clock__meta">Active cycle {state.activeCycle}</div>
-          )}
-        </div>
+        {demoMode && (
+          <div className="clock">
+            <div className="clock__label">Current sim time</div>
+            <div className="clock__value">{state.currentSimTime}</div>
+            {state.activeCycle && (
+              <div className="clock__meta">Active cycle {state.activeCycle}</div>
+            )}
+          </div>
+        )}
       </header>
 
-      <ScenarioConfigPanel demoMode={demoMode} />
+      {demoMode && <ScenarioConfigPanel demoMode={demoMode} />}
 
       {demoMode ? (
         <section className="card">
@@ -199,7 +202,7 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
         ) : (
           <section className="card">
             <header className="card__header">
-              <h2 className="card__title">Live batch activity</h2>
+              <h2 className="card__title">Live Batch Activity</h2>
               <p className="card__subtitle">
                 CCD files processed by scheduler or Scan CCD.
                 Settlement and return events appear in the Live Event Log below.
@@ -215,16 +218,38 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
                   const uploadPayments = livePayments.filter((p) => p.sourceFile === u.file_name);
                   const fileRiskLevel = computeBatchRiskLevel(uploadPayments);
                   const fileRiskReason = computeBatchRiskReason(uploadPayments);
+                  const heldCount = uploadPayments.filter(
+                    (p) => p.internalStatus === "WITH_BANK_VALIDATION_FAILED",
+                  ).length;
+                  const isHeld = heldCount > 0;
                   const statusCounts: Partial<Record<BusinessStatus, number>> = {};
                   for (const p of uploadPayments) {
                     statusCounts[p.currentStatus] = (statusCounts[p.currentStatus] ?? 0) + 1;
                   }
                   const dominated = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])[0]?.[0] as BusinessStatus | undefined;
-                  const itemClass = dominated === "WITH BENEFICIARY BANK" || dominated === "REJECTED BY BENEFICIARY BANK"
-                    ? "timeline__item--complete"
-                    : dominated === "SENT TO SCHEME"
-                      ? "timeline__item--active"
-                      : "timeline__item--pending";
+                  const dominatedStatus: BusinessStatus = dominated ?? "WITH BANK";
+                  const itemClass = isHeld
+                    ? "timeline__item--pending"
+                    : dominated === "WITH BENEFICIARY BANK" || dominated === "REJECTED BY BENEFICIARY BANK"
+                      ? "timeline__item--complete"
+                      : dominated === "SENT TO SCHEME"
+                        ? "timeline__item--active"
+                        : "timeline__item--pending";
+
+                  const statusColorClass: Record<BusinessStatus, string> = {
+                    "WITH BANK": "",
+                    "SENT TO SCHEME": "text-info",
+                    "WITH BENEFICIARY BANK": "text-warn",
+                    "REJECTED BY SCHEME": "text-danger",
+                    "REJECTED BY BENEFICIARY BANK": "text-danger-2",
+                  };
+                  const statusLabel: Record<BusinessStatus, string> = {
+                    "WITH BANK": "With Bank",
+                    "SENT TO SCHEME": "Sent to Scheme",
+                    "WITH BENEFICIARY BANK": "With Beneficiary Bank",
+                    "REJECTED BY SCHEME": "Rejected by Scheme",
+                    "REJECTED BY BENEFICIARY BANK": "Rejected by Beneficiary Bank",
+                  };
                   return (
                     <li key={u.upload_id} className={`timeline__item ${itemClass}`}>
                       <div className="timeline__dot" aria-hidden />
@@ -233,9 +258,13 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
                           <span className="timeline__time">
                             {new Date(u.uploaded_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                           </span>
-                          <span className="timeline__status">
-                            {dominated ?? "WITH BANK"}
-                          </span>
+                          {isHeld ? (
+                            <span className="pre-sub__action-badge pre-sub__action-badge--hold">
+                              On Hold
+                            </span>
+                          ) : (
+                            <StatusBadge status={dominatedStatus} size="sm" />
+                          )}
                         </div>
                         <div className="timeline__label">{u.file_name}</div>
                         <div className="timeline__metrics">
@@ -245,9 +274,16 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
                           >
                             {fileRiskLevel} risk
                           </span>
-                          <span>{u.entry_count} payment(s)</span>
-                          {Object.entries(statusCounts).map(([s, n]) => (
-                            <span key={s}>{s}: {n}</span>
+                          <span>{u.entry_count} Payment{u.entry_count !== 1 ? "s" : ""}</span>
+                          {isHeld && (
+                            <span className="pre-sub__action-badge pre-sub__action-badge--hold">
+                              {heldCount} On Hold
+                            </span>
+                          )}
+                          {(Object.entries(statusCounts) as [BusinessStatus, number][]).map(([s, n]) => (
+                            <span key={s} className={statusColorClass[s] ?? ""}>
+                              {statusLabel[s] ?? s}: {n}
+                            </span>
                           ))}
                         </div>
                       </div>
@@ -264,7 +300,7 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
         <>
           <section className="card">
             <header className="card__header">
-              <h2 className="card__title">Event log</h2>
+              <h2 className="card__title">Event Log</h2>
               <p className="card__subtitle">
                 Latest events emitted in the SME-aligned flow. Settlement entries
                 are summary-level evidence and do not claim payment-level clearing.
@@ -286,7 +322,7 @@ export function DemoSimulatorPage({ demoMode }: DemoSimulatorPageProps) {
       ) : (
         <section className="card">
           <header className="card__header">
-            <h2 className="card__title">Live event log</h2>
+            <h2 className="card__title">Live Event Log</h2>
             <p className="card__subtitle">
               Real events emitted by backend agents and scheduler jobs.
               {lastRefreshed && <> Last refreshed: <strong>{lastRefreshed}</strong>.</>}

@@ -100,19 +100,6 @@ def _job_scan_return_files() -> None:
                 result.matched_count,
                 result.unmatched_count,
             )
-            if result.matched_count > 0:
-                store.append_event(
-                    "ReturnFileAgent",
-                    f"Return file received — {path.name}: {result.matched_count} payment(s) "
-                    "matched and marked REJECTED BY BENEFICIARY BANK. "
-                    f"{result.unmatched_count} unmatched return(s).",
-                )
-            else:
-                store.append_event(
-                    "ReturnFileAgent",
-                    f"Return file received — {path.name}: file processed successfully. "
-                    f"No payments matched ({result.unmatched_count} unmatched return(s)).",
-                )
             _move_unique(path, processed_dir)
             store.record_drop_file(
                 filename=path.name,
@@ -326,6 +313,32 @@ def _job_scan_ccd_files() -> None:
                     f"CCD file received — {path.name}: {result.entry_count} payment(s) created "
                     "and moved to SENT TO SCHEME after bank-side validation passed.",
                 )
+                # Run pre-submission risk validation immediately so risk is
+                # visible on the Batch Dashboard before the scheme_pusher fires.
+                try:
+                    from payment_tracking_agent.services import pre_submission_service  # noqa: PLC0415
+                    upload_rec = store.get_upload(result.upload_id) if result.upload_id else None
+                    if upload_rec:
+                        validation = pre_submission_service.validate_batch_before_submission(upload_rec)
+                        store.save_pre_submission_result(validation)
+                        store.append_event(
+                            "BeforePaymentSubmissionAgent",
+                            f"Pre-submission risk — {path.name}: "
+                            f"{validation.ai_batch_summary} "
+                            f"(batch risk={validation.batch_risk_level} "
+                            f"hold={validation.hold_count} review={validation.review_count} "
+                            f"proceed={validation.proceed_count})",
+                        )
+                        logger.info(
+                            "Scheduler [ccd_scanner]: pre-submission risk — %s risk=%s hold=%d review=%d proceed=%d",
+                            path.name, validation.batch_risk_level,
+                            validation.hold_count, validation.review_count, validation.proceed_count,
+                        )
+                except Exception as _ps_exc:  # noqa: BLE001
+                    logger.warning(
+                        "Scheduler [ccd_scanner]: pre-submission validation failed for %s: %s",
+                        path.name, _ps_exc, exc_info=True,
+                    )
             else:
                 logger.warning(
                     "Scheduler [ccd_scanner]: %s — syntax errors, moved to under-review",
@@ -387,6 +400,12 @@ def _job_scan_ccd_files() -> None:
 # Lifecycle
 # ---------------------------------------------------------------------------
 
+def _job_persist_store() -> None:
+    """Flush the in-memory ledger to database_json/store.json if dirty."""
+    from payment_tracking_agent.ledger import store as _store  # noqa: PLC0415
+    _store.persist_if_dirty()
+
+
 def start_scheduler() -> None:
     """Register jobs and start the APScheduler instance."""
     _scheduler.add_job(
@@ -425,15 +444,24 @@ def start_scheduler() -> None:
             replace_existing=True,
             misfire_grace_time=10,
         )
+    if settings.persist_interval_seconds > 0:
+        _scheduler.add_job(
+            _job_persist_store,
+            trigger=IntervalTrigger(seconds=settings.persist_interval_seconds),
+            id="store_persister",
+            replace_existing=True,
+            misfire_grace_time=30,
+        )
     _scheduler.start()
     logger.info(
         "Scheduler started — ccd_scan=%ds  return_scan=%ds  scheme_push=%ds  "
-        "settlement_scan=%ds  settlement_sim=%ds",
+        "settlement_scan=%ds  settlement_sim=%ds  persist=%ds",
         settings.ccd_scan_interval_seconds,
         settings.return_scan_interval_seconds,
         settings.scheme_push_interval_seconds,
         settings.settlement_scan_interval_seconds,
         settings.settlement_simulation_interval_seconds,
+        settings.persist_interval_seconds,
     )
 
 
