@@ -123,8 +123,9 @@ def process_ccd_upload(file_name: str, content: bytes) -> UploadCCDResponse:
 
     store.append_event(
         "BeforePaymentSubmissionAgent",
-        f"CCD uploaded \u2014 {file_name}: {parsed.entry_count} payment(s) parsed across "
-        f"{len(parsed.batches)} batch(es). Status: WITH BANK.",
+        f"CCD received \u2014 {file_name}: {parsed.entry_count} payment(s) parsed across "
+        f"{len(parsed.batches)} batch(es). Held WITH BANK — awaiting pre-submission "
+        "risk validation before scheme submission.",
     )
 
     # ------------------------------------------------------------------
