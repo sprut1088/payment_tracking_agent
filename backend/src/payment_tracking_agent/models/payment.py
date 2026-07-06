@@ -97,7 +97,10 @@ class EntryDetailRecord(BaseModel):
     amount_cents: int
     amount: float
     individual_id_number: str
-    individual_name: str
+    individual_name: str            # beneficiary / counterparty (Entry Detail type 6)
+    # Originator fields — copied from the enclosing Batch Header (type 5)
+    company_name: str = ""          # originating company — the bank's customer
+    company_identification: str = "" # 10-char company ID from Batch Header
     trace_number: str
     addenda_indicator: str
     batch_number: str

@@ -167,7 +167,6 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
                   </td>
                   <td>
                     <div>{p.customerName}</div>
-                    <div className="table__sub">{p.customerId}</div>
                   </td>
                   <td>{p.beneficiaryName}</td>
                   <td>

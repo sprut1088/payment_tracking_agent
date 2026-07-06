@@ -360,7 +360,9 @@ export interface BackendPaymentListItem {
   uploaded_at: string;
   trace_number: string;
   batch_number: string;
-  individual_name: string;
+  company_name: string;          // originating company from Batch Header (type 5)
+  company_identification: string; // 10-char company ID
+  individual_name: string;       // beneficiary / counterparty from Entry Detail (type 6)
   individual_id_number: string;
   amount: number;
   amount_cents: number;

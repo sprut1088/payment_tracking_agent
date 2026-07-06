@@ -85,7 +85,7 @@ function CustomerRow({ c }: { c: PreSubmissionCustomerSummary }) {
 }
 
 export function PreSubmissionPanel({ result, uploadId, holdCount, onAction }: PreSubmissionPanelProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);

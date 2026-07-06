@@ -681,9 +681,11 @@ function mapBackendPayment(item: BackendPaymentListItem): PaymentRecord {
     cycleTime: uploadedTime,
     sourceFile: item.file_name,
     companyId: "",
-    customerId: item.individual_id_number.trim() || item.individual_name.trim() || item.trace_number,
-    customerName: item.individual_name.trim() || "Unknown",
-    beneficiaryName: item.individual_name.trim() || "Unknown",
+    // customerId uses the same priority as list_customers() on the backend so the
+    // Customer Dashboard filter (p.customerId === selected) always matches.
+    customerId: item.company_identification.trim() || item.company_name.trim() || item.individual_id_number.trim() || item.individual_name.trim() || item.trace_number,
+    customerName: item.company_name.trim() || "Unknown",         // originating company — bank's customer
+    beneficiaryName: item.individual_name.trim() || "Unknown",   // counterparty / payment recipient
     receivingDfi: item.receiving_dfi,
     maskedAccount: item.dfi_account_number_masked,
     amount: item.amount,

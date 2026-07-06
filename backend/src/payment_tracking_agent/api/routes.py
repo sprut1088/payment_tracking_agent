@@ -339,6 +339,8 @@ def list_payments(
                         uploaded_at=record.uploaded_at,
                         trace_number=entry.trace_number,
                         batch_number=entry.batch_number,
+                        company_name=batch.header.company_name,
+                        company_identification=batch.header.company_identification,
                         individual_name=entry.individual_name,
                         individual_id_number=entry.individual_id_number,
                         amount=entry.amount,
@@ -369,12 +371,20 @@ def list_customers() -> list[CustomerSummaryItem]:
     Counts are grouped from the full payment ledger.  Risk level is computed
     once per customer using the time-aware risk engine.
     """
-    # Build per-customer payment buckets
+    # Build per-customer payment buckets.
+    # "Customer" = the originating company (from Batch Header type 5).
+    # Use company_identification (10-char ID) as primary key with company_name as fallback.
     by_customer: dict[str, list] = {}
     for record in store.list_uploads():
         for batch in record.parsed.batches:
             for entry in batch.entries:
-                cid = entry.individual_id_number or entry.individual_name or entry.trace_number
+                cid = (
+                    entry.company_identification.strip()
+                    or entry.company_name.strip()
+                    or entry.individual_id_number
+                    or entry.individual_name
+                    or entry.trace_number
+                )
                 by_customer.setdefault(cid, []).append(entry)
 
     if not by_customer:
@@ -409,7 +419,11 @@ def list_customers() -> list[CustomerSummaryItem]:
         results.append(
             CustomerSummaryItem(
                 customer_id=cid,
-                customer_name=entries[0].individual_name or "Unknown",
+                customer_name=(
+                    entries[0].company_name.strip()
+                    or entries[0].company_identification.strip()
+                    or "Unknown"
+                ),
                 total_payments=len(entries),
                 with_bank=sum(1 for e in entries if e.status in _BANK_STATUSES),
                 sent_to_scheme=sum(1 for e in entries if e.status in _SCHEME_STATUSES),

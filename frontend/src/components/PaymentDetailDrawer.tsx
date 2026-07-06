@@ -39,7 +39,6 @@ export function PaymentDetailDrawer({ payment, onClose }: PaymentDetailDrawerPro
           <div className="drawer__field">
             <span className="drawer__label">Customer</span>
             <div>{payment.customerName}</div>
-            <div className="drawer__sub">{payment.customerId}</div>
           </div>
           <div className="drawer__field">
             <span className="drawer__label">Beneficiary</span>

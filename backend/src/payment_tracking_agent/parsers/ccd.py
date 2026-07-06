@@ -69,7 +69,8 @@ def _parse_batch_header(line: str) -> BatchHeaderRecord:
 
 
 def _parse_entry_detail(
-    line: str, batch_number: str, sec_code: str
+    line: str, batch_number: str, sec_code: str,
+    company_name: str = "", company_identification: str = "",
 ) -> EntryDetailRecord:
     """Record type 6 — Entry Detail (one tracked payment)."""
     amount_raw = line[29:39]
@@ -84,10 +85,12 @@ def _parse_entry_detail(
         amount=round(amount_cents / 100.0, 2),
         individual_id_number=line[39:54].strip(),
         individual_name=line[54:76].strip(),
-        addenda_indicator=line[78:79].strip(),   # NACHA pos 79 (0-based index 78)
-        trace_number=line[79:94].strip(),          # NACHA pos 80-94 (15 chars)
+        addenda_indicator=line[78:79].strip(),
+        trace_number=line[79:94].strip(),
         batch_number=batch_number,
         sec_code=sec_code,
+        company_name=company_name,
+        company_identification=company_identification,
     )
 
 
@@ -136,6 +139,8 @@ def parse_ccd_bytes(content: bytes) -> ParsedCCDFile:
                     line,
                     batch_number=current_header.batch_number,
                     sec_code=current_header.sec_code,
+                    company_name=current_header.company_name,
+                    company_identification=current_header.company_identification,
                 )
                 current_entries.append(entry)
 

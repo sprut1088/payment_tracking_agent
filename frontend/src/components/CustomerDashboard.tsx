@@ -113,7 +113,6 @@ export function CustomerDashboard({ onSelectPayment, demoMode, refreshKey }: Cus
                 {riskLevel}
               </span>
             </div>
-            <div className="customer-card__id">{c.customerId}</div>
             <div className="customer-card__metrics">
               <span>{c.totalPayments} Total</span>
               <span>{c.withBank} With Bank</span>

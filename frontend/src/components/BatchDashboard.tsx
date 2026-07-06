@@ -268,7 +268,6 @@ export function BatchDashboard({ onSelectPayment, demoMode, refreshKey }: BatchD
                 </td>
                 <td>
                   <div>{p.customerName}</div>
-                  <div className="table__sub">{p.customerId}</div>
                 </td>
                 <td>{p.beneficiaryName}</td>
                 <td className="table__num">${p.amount.toFixed(2)}</td>

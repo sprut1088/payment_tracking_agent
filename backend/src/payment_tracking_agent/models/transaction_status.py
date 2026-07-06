@@ -65,7 +65,9 @@ class PaymentListItem(BaseModel):
 
     trace_number: str
     batch_number: str
-    individual_name: str
+    company_name: str = ""             # originating company from Batch Header (type 5)
+    company_identification: str = ""   # 10-char company ID from Batch Header
+    individual_name: str          # beneficiary / counterparty from Entry Detail (type 6)
     individual_id_number: str
     amount: float
     amount_cents: int

@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Return codes that specifically indicate an account-number / routing problem
 _ACCOUNT_REJECTION_CODES: frozenset[str] = frozenset({
+    "R02",  # Account Closed
     "R03",  # No Account / Unable to Locate Account
     "R04",  # Invalid Account Number
     "R16",  # Account Frozen / Access Restricted
@@ -68,10 +69,15 @@ def _check_account_rejection_history(
     all_entries = store.list_all_entries()
     current_suffix = account_masked[-4:] if len(account_masked) >= 4 else account_masked
 
-    # Collect ALL past return codes for this customer
+    # Match by vendor name (individual_name) — the beneficiary who was previously
+    # rejected.  Using company key here would miss old ledger entries that were
+    # parsed before company_identification was added to EntryDetailRecord.
+    vendor_key = customer_name.strip().lower() if customer_name else customer_key.strip().lower()
+
+    # Collect ALL past return codes for this vendor
     past_by_code: dict[str, list] = {}
     for entry in all_entries:
-        if _customer_key(entry) != customer_key:
+        if entry.individual_name.strip().lower() != vendor_key:
             continue
         if not entry.return_reason_code:
             continue
@@ -206,9 +212,9 @@ def validate_batch_before_submission(upload_record: UploadRecord) -> BatchPreSub
                 risk_cache[cid] = (risk_level, risk_reason)
             risk_level, risk_reason = risk_cache[cid]
 
-            # ── Account rejection history check ───────────────────────────
-            # Deterministic: flag if the same customer's account/routing was
-            # previously rejected for account-related reasons (R03, R04 etc.)
+            # ── Account/vendor rejection history check ────────────────────
+            # Matches by individual_name (vendor) so it works across all ledger
+            # data regardless of whether company_identification is populated.
             acct_flag, acct_severity = _check_account_rejection_history(
                 customer_key=cid,
                 receiving_dfi=entry.receiving_dfi,

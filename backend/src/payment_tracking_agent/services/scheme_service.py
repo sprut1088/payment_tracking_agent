@@ -54,13 +54,12 @@ def push_pending_uploads_to_scheme() -> list[str]:
         try:
             from payment_tracking_agent.services import pre_submission_service  # noqa: PLC0415
 
-            # Reuse the result stored at scan time — avoids re-running LLM calls
-            # for every scheme_pusher tick (which would block the job for 30-60 s).
-            validation = store.get_pre_submission_result(record.upload_id)
-            if validation is None:
-                # Not cached yet — compute now (e.g. file dropped directly, no scan)
-                validation = pre_submission_service.validate_batch_before_submission(record)
-                store.save_pre_submission_result(validation)
+            # Always recompute at scheme-push time so the validation reflects the
+            # CURRENT ledger state.  Return records that arrived after the initial
+            # scan would be missed if we used the cached scan-time result.
+            # The risk engine's 60-second TTL cache limits redundant LLM calls.
+            validation = pre_submission_service.validate_batch_before_submission(record)
+            store.save_pre_submission_result(validation)
 
             # Build per-trace action map so we can route payments individually
             for pa in validation.payment_assessments:
