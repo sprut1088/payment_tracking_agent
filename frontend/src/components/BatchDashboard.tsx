@@ -171,9 +171,9 @@ export function BatchDashboard({ onSelectPayment, demoMode, refreshKey }: BatchD
               <span>{b.withBank} With Bank</span>
               <span className="text-info">{b.sentToScheme} Sent to Scheme</span>
               <span className="text-warn">{b.withBeneficiaryBank} With Beneficiary Bank</span>
-              <span className="text-danger">{b.rejectedByScheme} Rejected by Scheme</span>
+              <span className="text-danger">{b.rejectedByScheme} Rejected (Scheme)</span>
               <span className="text-danger-2">
-                {b.rejectedByBeneficiaryBank} Rejected by Beneficiary Bank
+                {b.rejectedByBeneficiaryBank} Returned (Bank)
               </span>
             </div>
           </button>

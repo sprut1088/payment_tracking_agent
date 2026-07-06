@@ -118,9 +118,9 @@ export function CustomerDashboard({ onSelectPayment, demoMode, refreshKey }: Cus
               <span>{c.withBank} With Bank</span>
               <span className="text-info">{c.sentToScheme} Sent to Scheme</span>
               <span className="text-warn">{c.withBeneficiaryBank} With Beneficiary Bank</span>
-              <span className="text-danger">{c.rejectedByScheme} Rejected by Scheme</span>
+              <span className="text-danger">{c.rejectedByScheme} Rejected (Scheme)</span>
               <span className="text-danger-2">
-                {c.rejectedByBeneficiaryBank} Rejected by Beneficiary Bank
+                {c.rejectedByBeneficiaryBank} Returned (Bank)
               </span>
             </div>
             <div className="customer-card__history">

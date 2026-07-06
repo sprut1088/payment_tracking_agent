@@ -41,6 +41,106 @@ _ACCOUNT_REJECTION_CODES: frozenset[str] = frozenset({
     "R29",  # Corporate Customer Advises Not Authorized
 })
 
+_SUCCESS_STATUSES = frozenset({
+    "WITH_SCHEME_SUBMITTED",
+    "WITH_SCHEME_ACKNOWLEDGED",
+    "WITH_BENEFICIARY_BANK_PENDING",
+})
+
+
+def _digits_diff(a: str, b: str) -> int:
+    if len(a) != len(b):
+        return max(len(a), len(b))
+    return sum(x != y for x, y in zip(a, b))
+
+
+def _build_correction_hints(
+    vendor_name: str,
+    current_dfi: str,
+    current_account_masked: str,
+) -> str | None:
+    """Compare the current payment's routing/account against past SUCCESSFUL
+    payments for the same vendor and return a correction suggestion.
+
+    Scenarios covered:
+      1. Same account suffix, same routing → already worked before (reassurance)
+      2. Account suffix differs by 1 digit → likely typo, suggest known-good suffix
+      3. Routing differs by 1-2 digits  → likely routing typo, suggest known-good routing
+      4. Completely different account    → flag mismatch, show what was used successfully
+    """
+    from payment_tracking_agent.models.payment import PaymentStatus  # noqa: PLC0415
+
+    all_entries = store.list_all_entries()
+    vendor_lower = vendor_name.strip().lower()
+    current_suffix = current_account_masked[-4:] if len(current_account_masked) >= 4 else current_account_masked
+
+    successful = [
+        e for e in all_entries
+        if e.individual_name.strip().lower() == vendor_lower
+        and e.status.value in _SUCCESS_STATUSES
+        and e.dfi_account_number_masked
+    ]
+    if not successful:
+        return None
+
+    # Most common successful account suffix and routing
+    from collections import Counter  # noqa: PLC0415
+    suffix_counts = Counter(
+        e.dfi_account_number_masked[-4:] for e in successful
+        if len(e.dfi_account_number_masked) >= 4
+    )
+    dfi_counts = Counter(e.receiving_dfi for e in successful if e.receiving_dfi)
+
+    best_suffix = suffix_counts.most_common(1)[0][0] if suffix_counts else None
+    best_dfi = dfi_counts.most_common(1)[0][0] if dfi_counts else None
+
+    hints: list[str] = []
+
+    # ── Account suffix comparison ─────────────────────────────────────
+    if best_suffix:
+        if best_suffix == current_suffix:
+            hints.append(
+                f"account ending ****{current_suffix} was used successfully "
+                f"{suffix_counts[best_suffix]}× before — account number looks correct"
+            )
+        else:
+            diff = _digits_diff(best_suffix, current_suffix)
+            if diff == 1:
+                hints.append(
+                    f"POSSIBLE TYPO: current account ****{current_suffix} differs by "
+                    f"1 digit from ****{best_suffix} which was used successfully "
+                    f"{suffix_counts[best_suffix]}× — did you mean ****{best_suffix}?"
+                )
+            elif diff <= 2:
+                hints.append(
+                    f"account ****{current_suffix} not seen in prior successful payments; "
+                    f"****{best_suffix} was used successfully {suffix_counts[best_suffix]}× — "
+                    "verify account number with beneficiary"
+                )
+            else:
+                hints.append(
+                    f"account ****{current_suffix} is completely different from "
+                    f"****{best_suffix} used in {suffix_counts[best_suffix]} prior successful "
+                    "payments — confirm correct account with beneficiary"
+                )
+
+    # ── Routing comparison ────────────────────────────────────────────
+    if best_dfi and best_dfi != current_dfi and current_dfi:
+        diff = _digits_diff(best_dfi, current_dfi)
+        if diff <= 2 and len(best_dfi) == len(current_dfi):
+            hints.append(
+                f"POSSIBLE TYPO: current routing {current_dfi} differs by {diff} "
+                f"digit(s) from {best_dfi} used in {dfi_counts[best_dfi]} prior successful "
+                f"payments — did you mean {best_dfi}?"
+            )
+        else:
+            hints.append(
+                f"routing {current_dfi} not seen before; prior payments used "
+                f"{best_dfi} successfully"
+            )
+
+    return " | ".join(hints) if hints else None
+
 
 def _check_account_rejection_history(
     customer_key: str,
@@ -105,51 +205,33 @@ def _check_account_rejection_history(
                 f"routing {receiving_dfi} appeared in a prior {code} return ({desc})"
             )
 
-    # ── Path 2: all other codes — ask LLM to interpret ───────────────────
+    # ── Path 2: all other codes — deterministic frequency-based fallback ─
+    # Using LLM here is unnecessary: the code description + occurrence count
+    # gives operators all the context they need.  Frequency escalation:
+    #   3+ occurrences → HIGH (recurring unknown problem)
+    #   2  occurrences → MEDIUM
+    #   1  occurrence  → LOW (isolated, note only)
     unknown_codes = [
         (code, occs) for code, occs in past_by_code.items()
         if code not in _ACCOUNT_REJECTION_CODES
     ]
-    if unknown_codes:
-        try:
-            # Build a compact summary of the unknown codes for the LLM
-            code_lines = "\n".join(
-                f"  {code} ({RETURN_REASON_DESCRIPTIONS.get(code, 'unknown')}) "
-                f"× {len(occs)} time(s)"
-                for code, occs in unknown_codes
+    for code, occs in unknown_codes:
+        desc = RETURN_REASON_DESCRIPTIONS.get(code, "unknown return reason")
+        count = len(occs)
+        if count >= 3:
+            parts.append(
+                f"recurring return {code} ({desc}) × {count} — HIGH frequency, "
+                "investigate root cause before resubmission"
             )
-            user_msg = (
-                f"Customer: {customer_name or customer_key}\n"
-                f"Current payment: routing {receiving_dfi}, account ending {current_suffix}, "
-                f"amount ${amount:.2f}\n\n"
-                f"Historical return codes for this customer NOT in known account-rejection set:\n"
-                f"{code_lines}\n\n"
-                "For each code: explain whether it poses a risk for the current payment, "
-                "and suggest a specific corrective action the bank operator should take "
-                "before submitting to scheme.\n"
-                "Respond with a single concise paragraph (2-3 sentences)."
+        elif count == 2:
+            parts.append(
+                f"repeated return {code} ({desc}) × {count} — "
+                "verify payment details before resubmitting"
             )
-            llm_analysis = llm_fixer._call_generic_llm(  # noqa: SLF001
-                system=(
-                    "You are an ACH payment risk analyst. "
-                    "Analyse historical return codes for a customer and advise whether "
-                    "they indicate risk for a new payment. Be specific and actionable. "
-                    "Do NOT invent data beyond what is provided."
-                ),
-                user=user_msg,
-                max_tokens=300,
+        else:
+            parts.append(
+                f"prior return {code} ({desc}) — review reason before submitting"
             )
-            if llm_analysis:
-                parts.append(f"LLM analysis of other past codes: {llm_analysis}")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("LLM analysis of unknown return codes skipped: %s", exc)
-            # Deterministic fallback for unknown codes
-            for code, occs in unknown_codes:
-                desc = RETURN_REASON_DESCRIPTIONS.get(code, "unknown return")
-                parts.append(
-                    f"past return {code} ({desc}) × {len(occs)} — "
-                    "review reason before submitting"
-                )
 
     if not parts:
         return None, "LOW"
@@ -239,48 +321,98 @@ def validate_batch_before_submission(upload_record: UploadRecord) -> BatchPreSub
                 signals_cache[vendor_key] = compute_signals(vendor_key, history)
             signals = signals_cache[vendor_key]  # type: ignore[assignment]
 
-            # LLM assessment — once per vendor
+            # LLM assessment — once per vendor, with fast-path bypasses
             if vendor_key not in customer_ai_cache:
-                try:
-                    ai_result = llm_fixer.assess_pre_submission_payment(
-                        customer_name=entry.individual_name or vendor_key,
-                        customer_id=vendor_key,
-                        amount=entry.amount,
-                        receiving_dfi=entry.receiving_dfi,
-                        account_masked=entry.dfi_account_number_masked,
-                        risk_level=risk_level,
-                        risk_reason=risk_reason,
-                        historical_total_payments=signals.total_payments,
-                        historical_rejections=signals.total_rejections,
-                        historical_returns=signals.total_returns,
-                        rejection_rate_pct=signals.rejection_rate_pct,
-                        rejections_last_30d=signals.rejections_last_30d,
+                _action_map = {"HIGH": "HOLD", "MEDIUM": "REVIEW", "LOW": "PROCEED"}
+
+                # ── Fast path 1: HIGH account-rejection history → always HOLD ──
+                # The account is definitively invalid; no LLM needed.
+                # Include a correction hint from past successful payments.
+                if acct_flag and acct_severity == "HIGH":
+                    correction = _build_correction_hints(
+                        entry.individual_name or vendor_key,
+                        entry.receiving_dfi,
+                        entry.dfi_account_number_masked,
                     )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Pre-submission LLM call failed for %s: %s", vendor_key, exc)
-                    _action_map = {"HIGH": "HOLD", "MEDIUM": "REVIEW", "LOW": "PROCEED"}
+                    rec = (
+                        f"{acct_flag} Payment withheld — prior account rejection "
+                        "indicates high probability of re-rejection."
+                    )
+                    if correction:
+                        rec += f" Correction hint: {correction}."
+                    ai_result: dict[str, str] = {"action": "HOLD", "ai_recommendation": rec}
+
+                # ── Fast path 2: LOW risk, no history → always PROCEED ──
+                # Clean vendor with no prior issues; LLM would say PROCEED anyway.
+                elif risk_level == "LOW" and not acct_flag:
                     ai_result = {
-                        "action": _action_map.get(risk_level, "PROCEED"),
-                        "ai_recommendation": f"{risk_level} risk — {risk_reason}",
+                        "action": "PROCEED",
+                        "ai_recommendation": (
+                            f"No elevated risk signals detected for {entry.individual_name or vendor_key}. "
+                            "Payment cleared for submission."
+                        ),
                     }
-                if acct_flag:
-                    current_action = ai_result.get("action", "PROCEED")
-                    if acct_severity == "HIGH" and current_action != "HOLD":
+
+                # ── Fast path 3: MEDIUM risk, MEDIUM account flag → REVIEW ─
+                elif risk_level == "MEDIUM" and acct_flag and acct_severity == "MEDIUM":
+                    correction = _build_correction_hints(
+                        entry.individual_name or vendor_key,
+                        entry.receiving_dfi,
+                        entry.dfi_account_number_masked,
+                    )
+                    rec = f"{acct_flag} Prior return history detected. Review payment details before submitting to scheme."
+                    if correction:
+                        rec += f" Correction hint: {correction}."
+                    ai_result = {"action": "REVIEW", "ai_recommendation": rec}
+
+                # ── Slow path: genuinely ambiguous HIGH risk without account flag ─
+                # e.g. high rejection rate with no specific account code — LLM
+                # interprets whether the pattern warrants HOLD or REVIEW.
+                # Also pass correction hints from past successful payments.
+                else:
+                    correction = _build_correction_hints(
+                        entry.individual_name or vendor_key,
+                        entry.receiving_dfi,
+                        entry.dfi_account_number_masked,
+                    )
+                    enriched_reason = risk_reason
+                    if correction:
+                        enriched_reason = f"{risk_reason} | Past payment comparison: {correction}"
+                    try:
+                        ai_result = llm_fixer.assess_pre_submission_payment(
+                            customer_name=entry.individual_name or vendor_key,
+                            customer_id=vendor_key,
+                            amount=entry.amount,
+                            receiving_dfi=entry.receiving_dfi,
+                            account_masked=entry.dfi_account_number_masked,
+                            risk_level=risk_level,
+                            risk_reason=enriched_reason,
+                            historical_total_payments=signals.total_payments,
+                            historical_rejections=signals.total_rejections,
+                            historical_returns=signals.total_returns,
+                            rejection_rate_pct=signals.rejection_rate_pct,
+                            rejections_last_30d=signals.rejections_last_30d,
+                        )
+                        # Enforce minimum action from account flag
+                        if acct_flag and acct_severity == "MEDIUM":
+                            if ai_result.get("action") == "PROCEED":
+                                ai_result = {
+                                    "action": "REVIEW",
+                                    "ai_recommendation": (
+                                        f"{acct_flag} "
+                                        f"{ai_result.get('ai_recommendation', '')}".strip()
+                                    ),
+                                }
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Pre-submission LLM call failed for %s: %s", vendor_key, exc)
+                        action = _action_map.get(risk_level, "PROCEED")
+                        if acct_flag and acct_severity == "MEDIUM" and action == "PROCEED":
+                            action = "REVIEW"
                         ai_result = {
-                            "action": "HOLD",
-                            "ai_recommendation": (
-                                f"{acct_flag} "
-                                f"{ai_result.get('ai_recommendation', '')}".strip()
-                            ),
+                            "action": action,
+                            "ai_recommendation": f"{risk_level} risk — {risk_reason}",
                         }
-                    elif acct_severity == "MEDIUM" and current_action == "PROCEED":
-                        ai_result = {
-                            "action": "REVIEW",
-                            "ai_recommendation": (
-                                f"{acct_flag} "
-                                f"{ai_result.get('ai_recommendation', '')}".strip()
-                            ),
-                        }
+
                 customer_ai_cache[vendor_key] = ai_result
 
             ai = customer_ai_cache[vendor_key]

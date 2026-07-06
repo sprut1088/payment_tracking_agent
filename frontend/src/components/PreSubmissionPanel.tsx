@@ -121,7 +121,12 @@ export function PreSubmissionPanel({ result, uploadId, holdCount, onAction }: Pr
 
   return (
     <div className="pre-sub">
-      <div className="pre-sub__header" onClick={() => setExpanded((v) => !v)} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && setExpanded((v) => !v)}>
+      <button
+        type="button"
+        className="pre-sub__header"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
         <div className="pre-sub__header-left">
           <span className="pre-sub__toggle">{expanded ? "▾" : "▸"}</span>
           <span className="pre-sub__title">Pre-Submission Risk Validation</span>
@@ -141,11 +146,11 @@ export function PreSubmissionPanel({ result, uploadId, holdCount, onAction }: Pr
         </div>
         <div className="pre-sub__header-right">
           <span className="pre-sub__time">Validated at {validatedTime}</span>
-          <span className="pre-sub__collapse-btn">
-            {expanded ? "Collapse ▲" : "Expand ▼"}
+          <span className="pre-sub__collapse-btn" aria-hidden>
+            {expanded ? "▲" : "▼"}
           </span>
         </div>
-      </div>
+      </button>
 
       {(actionMsg || actionErr) && (
         <div className={actionMsg ? "pre-sub__action-notice pre-sub__action-notice--ok" : "pre-sub__action-notice pre-sub__action-notice--err"}>

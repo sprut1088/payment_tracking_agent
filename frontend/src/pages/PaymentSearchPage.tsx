@@ -9,19 +9,23 @@ interface PaymentSearchPageProps {
   isActive?: boolean;
 }
 
-const STATUS_FILTERS: { label: string; value: BusinessStatus | null }[] = [
+const STATUS_FILTERS: { label: string; value: BusinessStatus | null; internal?: string }[] = [
   { label: "All",                         value: null },
   { label: "With Bank",                   value: "WITH BANK" },
+  { label: "On Hold",                     value: "WITH BANK", internal: "WITH_BANK_VALIDATION_FAILED" },
   { label: "Sent to Scheme",              value: "SENT TO SCHEME" },
   { label: "With Beneficiary Bank",       value: "WITH BENEFICIARY BANK" },
-  { label: "Rejected by Scheme",          value: "REJECTED BY SCHEME" },
-  { label: "Rejected by Beneficiary Bank",value: "REJECTED BY BENEFICIARY BANK" },
+  { label: "Rejected (Scheme)",           value: "REJECTED BY SCHEME" },
+  { label: "Returned (Bank)",             value: "REJECTED BY BENEFICIARY BANK" },
 ];
 
 export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps) {
   const [query, setQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<BusinessStatus | null>(null);
+  const [internalFilter, setInternalFilter] = useState<string | null>(null);
   const [batchFilter, setBatchFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [results, setResults] = useState<PaymentRecord[]>([]);
   const [selected, setSelected] = useState<PaymentRecord | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -68,13 +72,29 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, demoMode, refreshKey]);
 
-  const distinctBatchIds = Array.from(new Set(results.map((p) => p.batchId))).sort();
+  const distinctBatches = Array.from(
+    new Map(results.map((p) => [p.batchId, `${p.sourceFile}  ·  ${p.cycleTime}`])).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+
+  // Batch-scoped results — used for chip counts so they reflect the selected batch
+  const batchScoped = batchFilter === "all"
+    ? results
+    : results.filter((p) => p.batchId === batchFilter);
 
   const filtered = results.filter((p) => {
-    if (statusFilter && p.currentStatus !== statusFilter) return false;
+    if (statusFilter) {
+      if (p.currentStatus !== statusFilter) return false;
+      if (internalFilter && p.internalStatus !== internalFilter) return false;
+    }
     if (batchFilter !== "all" && p.batchId !== batchFilter) return false;
     return true;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const resetPage = () => setCurrentPage(1);
 
   return (
     <div className="page">
@@ -98,7 +118,7 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
             className="field__control field__control--lg"
             placeholder="Trace number, payment ID, customer, batch, beneficiary…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); resetPage(); }}
             autoFocus
           />
         </label>
@@ -108,13 +128,16 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
             <button
               key={f.label}
               type="button"
-              className={`filter-chip${statusFilter === f.value ? " filter-chip--active" : ""}`}
-              onClick={() => setStatusFilter(f.value)}
+              className={`filter-chip${statusFilter === f.value && internalFilter === (f.internal ?? null) ? " filter-chip--active" : ""}`}
+              onClick={() => { setStatusFilter(f.value); setInternalFilter(f.internal ?? null); resetPage(); }}
             >
               {f.label}
               {f.value !== null && (
                 <span className="filter-chip__count">
-                  {results.filter((p) => p.currentStatus === f.value).length}
+                  {batchScoped.filter((p) =>
+                    p.currentStatus === f.value &&
+                    (!f.internal || p.internalStatus === f.internal)
+                  ).length}
                 </span>
               )}
             </button>
@@ -127,19 +150,19 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
             id="batch-filter"
             className="field__control filter-row__select"
             value={batchFilter}
-            onChange={(e) => setBatchFilter(e.target.value)}
+            onChange={(e) => { setBatchFilter(e.target.value); resetPage(); }}
           >
             <option value="all">All batches ({results.length} payment{results.length === 1 ? "" : "s"})</option>
-            {distinctBatchIds.map((bid) => (
+            {distinctBatches.map(([bid, sourceFile]) => (
               <option key={bid} value={bid}>
-                {bid} — {results.filter((p) => p.batchId === bid).length} payment{results.filter((p) => p.batchId === bid).length === 1 ? "" : "s"}
+                {sourceFile} — {results.filter((p) => p.batchId === bid).length} payment{results.filter((p) => p.batchId === bid).length === 1 ? "" : "s"}
               </option>
             ))}
           </select>
         </div>
 
         <div className="filter-row__count">
-          {loading ? "Searching…" : `${filtered.length} result${filtered.length === 1 ? "" : "s"}`}
+          {loading ? "Searching…" : `${filtered.length} result${filtered.length === 1 ? "" : "s"}${filtered.length > PAGE_SIZE ? ` — page ${safePage} of ${totalPages}` : ""}`}
         </div>
         {error && <div className="card__error">Backend error: {error}</div>}
       </section>
@@ -159,7 +182,7 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => (
+              {paginated.map((p) => (
                 <tr key={p.paymentId}>
                   <td>
                     <div className="table__mono">{p.traceNumber}</div>
@@ -175,7 +198,14 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
                   </td>
                   <td className="table__num">${p.amount.toFixed(2)}</td>
                   <td>
-                    <StatusBadge status={p.currentStatus} size="sm" />
+                    {p.internalStatus === "WITH_BANK_VALIDATION_FAILED" ? (
+                      <span className="status-composite">
+                        <StatusBadge status={p.currentStatus} size="sm" />
+                        <span className="pre-sub__action-badge pre-sub__action-badge--hold">On Hold</span>
+                      </span>
+                    ) : (
+                      <StatusBadge status={p.currentStatus} size="sm" />
+                    )}
                   </td>
                   <td className="table__action">
                     <button
@@ -198,6 +228,30 @@ export function PaymentSearchPage({ demoMode, isActive }: PaymentSearchPageProps
             </tbody>
           </table>
         </div>
+
+        {totalPages > 1 && (
+          <div className="pagination">
+            <button
+              type="button"
+              className="button button--sm button--ghost"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              ← Previous
+            </button>
+            <span className="pagination__info">
+              Page {safePage} of {totalPages} &nbsp;·&nbsp; {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+            </span>
+            <button
+              type="button"
+              className="button button--sm button--ghost"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next →
+            </button>
+          </div>
+        )}
       </section>
 
       <PaymentDetailDrawer payment={selected} onClose={() => setSelected(null)} />
