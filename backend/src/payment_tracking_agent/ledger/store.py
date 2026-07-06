@@ -438,9 +438,11 @@ def load_from_disk() -> None:
     corrupt entry doesn't block the whole restore.
     """
     path = _snapshot_path()
+    logger.info("Store snapshot path: %s", path.resolve())
     if not path.exists():
-        logger.info("No store snapshot found at %s — starting empty.", path)
+        logger.info("No store snapshot found at %s — starting with empty ledger.", path)
         return
+    logger.info("Loading store snapshot from %s (size=%d bytes)", path, path.stat().st_size)
     try:
         data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except Exception as exc:  # noqa: BLE001

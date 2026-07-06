@@ -51,15 +51,20 @@ def push_pending_uploads_to_scheme() -> list[str]:
         # ── Pre-submission risk validation ────────────────────────────
         hold_traces: set[str] = set()
         review_traces: set[str] = set()
+        validation_ok = False
         try:
             from payment_tracking_agent.services import pre_submission_service  # noqa: PLC0415
 
-            # Always recompute at scheme-push time so the validation reflects the
-            # CURRENT ledger state.  Return records that arrived after the initial
-            # scan would be missed if we used the cached scan-time result.
-            # The risk engine's 60-second TTL cache limits redundant LLM calls.
+            store.append_event(
+                "BeforePaymentSubmissionAgent",
+                f"Pre-submission validation starting — {record.file_name}: "
+                f"checking {len(entries)} payment(s) against historical rejection records "
+                "and AI risk signals before scheme submission.",
+            )
+
             validation = pre_submission_service.validate_batch_before_submission(record)
             store.save_pre_submission_result(validation)
+            validation_ok = True
 
             # Build per-trace action map so we can route payments individually
             for pa in validation.payment_assessments:
@@ -73,20 +78,35 @@ def push_pending_uploads_to_scheme() -> list[str]:
                 f"hold={validation.hold_count} review={validation.review_count} "
                 f"proceed={validation.proceed_count}"
             )
-            event_detail = (
-                f"Pre-submission validation — {record.file_name}: "
-                f"{validation.ai_batch_summary} ({risk_summary})"
+            status_label = (
+                "HOLD" if validation.hold_count
+                else "REVIEW" if validation.review_count
+                else "PROCEED"
             )
-            store.append_event("BeforePaymentSubmissionAgent", event_detail)
+            store.append_event(
+                "BeforePaymentSubmissionAgent",
+                f"Pre-submission validation complete — {record.file_name}: "
+                f"decision={status_label}. {validation.ai_batch_summary} ({risk_summary})",
+            )
             logger.info(
                 "Pre-submission validation — upload=%s %s",
                 record.upload_id, risk_summary,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Pre-submission validation failed for %s — proceeding anyway: %s",
+                "Pre-submission validation failed for %s — batch will not be sent to scheme: %s",
                 record.upload_id, exc, exc_info=True,
             )
+            store.append_event(
+                "BeforePaymentSubmissionAgent",
+                f"Pre-submission validation FAILED — {record.file_name}: {exc}. "
+                "Batch withheld from scheme. Will retry on next cycle.",
+            )
+
+        if not validation_ok:
+            # Do not send to scheme if validation could not complete.
+            # The batch stays WITH_BANK_UPLOADED and will be retried next tick.
+            continue
 
         src = Path(record.file_path)
         if not src.exists():

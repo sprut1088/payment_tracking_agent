@@ -197,7 +197,10 @@ def validate_batch_before_submission(upload_record: UploadRecord) -> BatchPreSub
     # ── Per-payment assessments ───────────────────────────────────────────
     payment_assessments: list[PaymentRiskAssessment] = []
 
-    # Cache LLM calls per customer so we don't duplicate API calls
+    # All caches are keyed by VENDOR (individual_name) not by company.
+    # Using the company key would collapse all 20 vendors onto one cached result,
+    # preventing per-vendor HOLD decisions and inflating risk via the feedback loop
+    # caused by WITH_BANK_VALIDATION_FAILED counting as a rejection.
     customer_ai_cache: dict[str, dict[str, str]] = {}
     risk_cache: dict[str, tuple[str, str]] = {}
     signals_cache: dict[str, object] = {}
@@ -205,43 +208,43 @@ def validate_batch_before_submission(upload_record: UploadRecord) -> BatchPreSub
     for batch in upload_record.parsed.batches:
         for entry in batch.entries:
             cid = _customer_key(entry)
+            # Per-vendor key for risk/AI caches — each vendor assessed individually.
+            vendor_key = (entry.individual_name.strip() or entry.individual_id_number.strip()
+                          or entry.trace_number)
 
-            # Risk engine (deterministic)
-            if cid not in risk_cache:
-                risk_level, risk_reason = compute_customer_risk(cid, history)
-                risk_cache[cid] = (risk_level, risk_reason)
-            risk_level, risk_reason = risk_cache[cid]
+            # Risk engine (deterministic) — per vendor
+            if vendor_key not in risk_cache:
+                risk_level, risk_reason = compute_customer_risk(vendor_key, history)
+                risk_cache[vendor_key] = (risk_level, risk_reason)
+            risk_level, risk_reason = risk_cache[vendor_key]
 
             # ── Account/vendor rejection history check ────────────────────
-            # Matches by individual_name (vendor) so it works across all ledger
-            # data regardless of whether company_identification is populated.
             acct_flag, acct_severity = _check_account_rejection_history(
-                customer_key=cid,
+                customer_key=vendor_key,
                 receiving_dfi=entry.receiving_dfi,
                 account_masked=entry.dfi_account_number_masked,
-                customer_name=entry.individual_name or cid,
+                customer_name=entry.individual_name or vendor_key,
                 amount=entry.amount,
             )
             if acct_flag:
-                # Escalate: account codes → HIGH (HOLD), others → MEDIUM (REVIEW)
                 risk_level = _worst_risk(risk_level, acct_severity)
                 risk_reason = f"{acct_flag} {risk_reason}".strip()
                 logger.info(
-                    "Pre-submission account flag [%s] — cid=%s trace=%s: %s",
-                    acct_severity, cid, entry.trace_number, acct_flag,
+                    "Pre-submission account flag [%s] — vendor=%s trace=%s: %s",
+                    acct_severity, vendor_key, entry.trace_number, acct_flag,
                 )
 
-            # Signals (for LLM prompt)
-            if cid not in signals_cache:
-                signals_cache[cid] = compute_signals(cid, history)
-            signals = signals_cache[cid]  # type: ignore[assignment]
+            # Signals (for LLM prompt) — per vendor
+            if vendor_key not in signals_cache:
+                signals_cache[vendor_key] = compute_signals(vendor_key, history)
+            signals = signals_cache[vendor_key]  # type: ignore[assignment]
 
-            # LLM assessment (once per customer — include account flag if present)
-            if cid not in customer_ai_cache:
+            # LLM assessment — once per vendor
+            if vendor_key not in customer_ai_cache:
                 try:
                     ai_result = llm_fixer.assess_pre_submission_payment(
-                        customer_name=entry.individual_name or cid,
-                        customer_id=cid,
+                        customer_name=entry.individual_name or vendor_key,
+                        customer_id=vendor_key,
                         amount=entry.amount,
                         receiving_dfi=entry.receiving_dfi,
                         account_masked=entry.dfi_account_number_masked,
@@ -254,15 +257,12 @@ def validate_batch_before_submission(upload_record: UploadRecord) -> BatchPreSub
                         rejections_last_30d=signals.rejections_last_30d,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("Pre-submission LLM call failed for %s: %s", cid, exc)
+                    logger.warning("Pre-submission LLM call failed for %s: %s", vendor_key, exc)
                     _action_map = {"HIGH": "HOLD", "MEDIUM": "REVIEW", "LOW": "PROCEED"}
                     ai_result = {
                         "action": _action_map.get(risk_level, "PROCEED"),
                         "ai_recommendation": f"{risk_level} risk — {risk_reason}",
                     }
-                # Account flag overrides LLM based on severity:
-                #   HIGH  (account codes R03/R04/R16…) → always HOLD regardless of LLM
-                #   MEDIUM (other return codes)          → at minimum REVIEW
                 if acct_flag:
                     current_action = ai_result.get("action", "PROCEED")
                     if acct_severity == "HIGH" and current_action != "HOLD":
@@ -281,9 +281,9 @@ def validate_batch_before_submission(upload_record: UploadRecord) -> BatchPreSub
                                 f"{ai_result.get('ai_recommendation', '')}".strip()
                             ),
                         }
-                customer_ai_cache[cid] = ai_result
+                customer_ai_cache[vendor_key] = ai_result
 
-            ai = customer_ai_cache[cid]
+            ai = customer_ai_cache[vendor_key]
 
             payment_assessments.append(PaymentRiskAssessment(
                 trace_number=entry.trace_number,

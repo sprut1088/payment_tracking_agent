@@ -62,7 +62,10 @@ _REJECTED_STATUSES: frozenset[PaymentStatus] = frozenset(
     {
         PaymentStatus.REJECTED_BY_RETURN_FILE,     # beneficiary-bank return
         PaymentStatus.REJECTED_BY_SETTLEMENT,       # settlement rejection
-        PaymentStatus.WITH_BANK_VALIDATION_FAILED,  # failed bank-side validation
+        # WITH_BANK_VALIDATION_FAILED is intentionally excluded — it is an internal
+        # hold-for-review state, not an actual ACH rejection.  Including it would
+        # create a feedback loop where every held batch inflates the rejection rate,
+        # causing all subsequent batches for the same vendor to be held forever.
     }
 )
 

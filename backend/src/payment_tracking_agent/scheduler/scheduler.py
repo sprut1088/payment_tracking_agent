@@ -310,8 +310,8 @@ def _job_scan_ccd_files() -> None:
                 )
                 store.append_event(
                     "BeforePaymentSubmissionAgent",
-                    f"CCD file received — {path.name}: {result.entry_count} payment(s) created "
-                    "and moved to SENT TO SCHEME after bank-side validation passed.",
+                    f"CCD file received — {path.name}: {result.entry_count} payment(s) parsed "
+                    "and held WITH BANK pending pre-submission risk validation before scheme submission.",
                 )
                 # Run pre-submission risk validation immediately so risk is
                 # visible on the Batch Dashboard before the scheme_pusher fires.
