@@ -1,0 +1,99 @@
+# ── ACH Payment Tracking Agent — Docker Compose ──────────────────────────────
+#
+# Services:
+#   backend   — FastAPI (Python 3.11), port 8000
+#   frontend  — React/Vite served by nginx, port 80
+#
+# Usage:
+#   1. Copy .env.docker.example to .env.docker and add your API keys.
+#   2. docker compose up --build
+#
+# Frontend is served at  http://localhost
+# Backend API is at      http://localhost:8000
+# Swagger docs are at    http://localhost/docs  (proxied through nginx)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Backend: FastAPI ACH Payment Tracking Agent ──────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ach-backend
+    ports:
+      - "8000:8000"
+
+    # Environment variables — override defaults from config.py.
+    # Sensitive values (API keys) are loaded from .env.docker if present.
+    environment:
+      - PTA_ENVIRONMENT=docker
+      # Allow requests from the nginx frontend container (port 80) and direct dev access.
+      - PTA_CORS_ORIGINS=["http://localhost","http://localhost:80","http://localhost:5173","http://frontend"]
+      # Persist ledger to the mounted volume.
+      - PTA_DATA_DIR=/app/database_json
+      - PTA_PERSIST_INTERVAL_SECONDS=30
+      # LLM provider — set to "openai" or "anthropic". Leave blank to disable AI features.
+      # - PTA_LLM_PROVIDER=openai
+      # - PTA_LLM_API_KEY=your-openai-or-openrouter-key
+      # - ANTHROPIC_API_KEY=your-anthropic-key
+      # - PTA_LLM_MODEL=openai/gpt-4o-mini
+      # - PTA_LLM_MAX_TOKENS=300
+
+    # Load optional secrets file. Create from .env.docker.example.
+    env_file:
+      - path: .env.docker
+        required: false
+
+    # Persistent volumes for data that must survive container restarts.
+    volumes:
+      - backend-db:/app/database_json
+      - backend-demo-inbox:/app/demo-inbox
+      - backend-drop:/app/drop
+      - backend-uploads:/app/uploaded_files
+
+    networks:
+      - ach-network
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ── Frontend: React/Vite served by nginx ─────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ach-frontend
+    ports:
+      - "80:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    networks:
+      - ach-network
+
+    restart: unless-stopped
+
+# ── Named volumes for data persistence ───────────────────────────────────────
+volumes:
+  backend-db:
+    driver: local
+  backend-demo-inbox:
+    driver: local
+  backend-drop:
+    driver: local
+  backend-uploads:
+    driver: local
+
+# ── Internal network ──────────────────────────────────────────────────────────
+networks:
+  ach-network:
+    driver: bridge

@@ -1,3 +1,6 @@
+# Docker secrets (copied from .env.docker.example — never commit)
+.env.docker
+
 # Python
 __pycache__/
 *.py[cod]

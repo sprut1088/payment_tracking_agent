@@ -1,0 +1,38 @@
+# Backend .dockerignore
+# Excludes files that should not be sent to the Docker build context.
+
+# Virtual environments and build artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Environment files — secrets must not be baked into the image
+.env
+.env.*
+!.env.example
+
+# Test files — not needed in the production image
+tests/
+
+# Runtime data directories — provided via Docker volumes at runtime
+database_json/
+demo-inbox/
+drop/
+uploaded_files/
+
+# OS / editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
